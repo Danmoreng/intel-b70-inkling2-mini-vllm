@@ -86,7 +86,19 @@ if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
     base=/opt/venv/lib/python3.12/site-packages/vllm
     mkdir -p "$work/v2"
     files=(config/vllm.py v1/worker/gpu/spec_decode/__init__.py v1/worker/gpu/model_runner.py)
+    adaptive=${INKLING2_DSPARK_ADAPTIVE:-0}
+    if [[ $adaptive == 1 ]]; then
+        if [[ ${INKLING2_RING_PREFIX:-0} != 1 || ${INKLING2_DSPARK_SAMPLING:-greedy} != probabilistic ]]; then
+            echo "Adaptive DSpark requires synchronous prefix reuse and probabilistic proposals" >&2
+            exit 2
+        fi
+        files+=(v1/worker/gpu/spec_decode/utils.py)
+    fi
     docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${files[@]}" | tar -xf - -C "$work/v2"
+    if [[ $adaptive == 1 ]]; then
+        patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-inkling-adaptive-draft.patch
+        spec_mounts+=(--env INKLING2_DSPARK_ADAPTIVE=1)
+    fi
     patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 <patches/vllm-v2-inkling-dspark.patch
     for file in "${files[@]}"; do
         spec_mounts+=(--mount "type=bind,source=$work/v2/$file,target=$base/$file,readonly")

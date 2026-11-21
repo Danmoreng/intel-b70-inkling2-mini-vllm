@@ -319,6 +319,12 @@ class InklingDraft:
                 else:
                     prev = logits.argmax(dim=-1)
             steps.append(prev)
+        if self.sampling is not None and self.sampling.adaptive:
+            # A low-confidence token may be offered, but no subsequent token is.
+            keep = self.sampling.confidence[0] >= 0.75
+            for i in range(1, len(steps)):
+                steps[i] = torch.where(keep, steps[i], -1)
+                keep = keep & (self.sampling.confidence[i] >= 0.75)
         return torch.stack(steps, dim=1)
 
 
@@ -327,6 +333,8 @@ class DraftSampling:
 
     def __init__(self, width, vocab, device, fp64):
         self.logits = torch.full((1, width, vocab), -float("inf"), device=device, dtype=torch.float32)
+        self.adaptive = os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
+        self.confidence = [None] * width if self.adaptive else []
         self.temperature = torch.zeros(1, device=device)
         self.seed = torch.zeros(1, dtype=torch.int64, device=device)
         self.slot = torch.zeros_like(self.seed)
@@ -342,6 +350,9 @@ class DraftSampling:
         if 0 < self.topk < values.shape[-1]:
             values, indices = values.topk(self.topk, dim=-1)
             ids = indices[0] if ids is None else ids[indices[0]]
+        if self.adaptive:
+            scaled = values.float() / self.temperature.clamp_min(0.01)
+            self.confidence[step] = scaled.softmax(-1).amax(-1)
         if ids is not None:
             full = torch.full_like(self.logits[:, step], -float("inf"))
             full.scatter_(1, ids.reshape(1, -1), values.float().reshape(1, -1))

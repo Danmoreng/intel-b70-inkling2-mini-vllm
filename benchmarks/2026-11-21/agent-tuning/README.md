@@ -58,6 +58,7 @@ The medium profile requested 16,384 output tokens per turn, including up to 8,19
 | Adaptive, threshold 0.75 | 4/4 | 153.78 | 13,305 | — | — | — |
 | Rebuilt, tensor draft mix | 4/4 | 206.34 | 17,382 | 3/4 | 536.91 | 45,695 |
 | Rebuilt, fused draft mix | 4/4 | 190.27 | 16,219 | 3/4 | 566.55 | 47,274 |
+| Rebuilt, adaptive threshold 0.75 | 4/4 | 174.19 | 14,993 | 4/4 | 452.83 | 39,131 |
 
 The archived Qwen reference solved the same four original tasks in 145.88 s using 8,130 generated tokens. On the rebuilt Inkling recipe, the four original tasks used 16,219 tokens with fused DSpark, including all tool turns. For this panel the target tokenizers and generation trajectories differ. [Archived Qwen run and fixture details](../agent-decode/README.md)
 
@@ -77,6 +78,8 @@ The open sampler completed both streaming-codec seeds and one routing seed on th
 ### Verification width
 
 At a 0.52 confidence threshold, both repeats on the three short code prompts accepted 1,799 of 3,061 offered tokens (58.8%). Fixed-width DSpark accepted 1,847 of 3,678 (50.2%). The higher acceptance fraction came with fewer accepted tokens for the same output length. Median client decode moved from 81.24 to 81.52 and 81.60 tok/s. On the original editing tasks both configurations solved four cases and adaptive verification took 195.80 s versus 173.07 s. On the harder panel both solved two cases. The adaptive pair of successful runs took 313.08 s in total versus 233.21 s for the fixed-width pair. They solved different routing seeds. A separate 0.75 threshold reached 84.23, 95.94 and 80.54 tok/s on the three frozen prompts. The late fixed-width control measured 85.04, 81.22 and 74.49. On the four original coding cases the 0.75 prototype solved all four in 153.78 s. That prototype used the earlier kernel stack and did not run the harder panel at this threshold. The default coding recipe uses three fixed proposals. [Per-request acceptance and decode](serving.json) · [Coding-task outcomes](coding-panel.json)
+
+For the optional rebuilt variant, start `INKLING2_DSPARK_ADAPTIVE=1 bash scripts/serve-coding-agent.sh dspark`. The synchronous scheduler receives the live prefix from the drafter. Low confidence at one position suppresses later proposals, and the target captures graphs for the intermediate verify widths. On the four original real coding cases, this rebuilt configuration solved 4/4 in 174.19 s with 14,993 generated tokens, versus 190.27 s with fixed width on this same stack. The earlier 153.78 s prototype and this final combination are separate measurements. The optional rebuilt profile completed 4/4 held-out tasks correctly in 452.83 s across all attempts. The setting can change sampled outputs, tool turns and task success. [Individual fixtures and settings](coding-panel.json)
 
 ### Draft feature fusion and graph inputs
 

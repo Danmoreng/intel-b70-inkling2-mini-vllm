@@ -59,6 +59,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if self.want_dspark and spec.num_speculative_tokens not in (1, 3, 7) and not self.arbitrary_rows:
             raise ValueError("This DSpark width requires FP8 KV and both target XMX attention kernels")
         self.capture_rows = {1, spec.num_speculative_tokens + 1} if self.want_dspark else {1}
+        if self.want_dspark and os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
+            if vllm_config.scheduler_config.async_scheduling:
+                raise ValueError("Adaptive DSpark requires synchronous scheduling")
+            if not self.arbitrary_rows:
+                raise ValueError("Adaptive DSpark requires FP8 KV and both target XMX attention kernels")
+            self.capture_rows.update(range(2, spec.num_speculative_tokens + 1))
         self.max_context = vllm_config.model_config.max_model_len
         self.checkpoint = checkpoint
         self.logit_cap = self.tc["final_logit_softcapping"]
