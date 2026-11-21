@@ -67,6 +67,9 @@ if [[ "$mode" == exl3 ]]; then
     build_lib="/build/$lib_name"
     library=${INKLING2_EXL3_TEST_LIB:-"/lab/.work/build/$lib_name"}
     if [[ ${INKLING2_EXL3_BUILD:-1} == 1 ]]; then
+        # The pinned vendor wrapper filters compiler output and then checks
+        # the output path. Only a fresh compiler artifact can pass that check.
+        rm -f -- "$output/$lib_name.new"
         timeout --kill-after=10s 8m docker run --rm --name "$build_name" --network none \
             --cpus 4 --memory 6g --user "$owner" \
             --mount "type=bind,source=$vendor,target=/opt/trellis-serve,readonly" \
@@ -92,13 +95,13 @@ if ! timeout --kill-after=10s 5m docker run --rm --name "$build_name" --network 
     --cpus 3 --memory 4g --user "$owner" \
     --mount "type=bind,source=$vendor,target=/opt/trellis-serve,readonly" \
     --mount "type=bind,source=$output,target=/build" \
-    --env INKLING2_OUT=/build/inkling2-vllm.so --entrypoint /bin/bash "$builder" \
+    --env INKLING2_OUT=/build/inkling2-vllm.so.new --entrypoint /bin/bash "$builder" \
     /opt/trellis-serve/xpu/scripts/build_inkling2.sh >"$output/compile.log" 2>&1; then
     tail -60 "$output/compile.log" >&2
     exit 1
 fi
 
-library=/lab/.work/build/inkling2-vllm.so
+library=/lab/.work/build/inkling2-vllm.so.new
 timeout --kill-after=10s 3m docker run --rm --name "$check_name" --network none \
     --cpus 3 --memory 3g --device "$(readlink -f -- "$render_node")" \
     --mount "type=bind,source=$PWD,target=/lab,readonly" \
@@ -106,3 +109,4 @@ timeout --kill-after=10s 3m docker run --rm --name "$check_name" --network none 
     --env INKLING2_LIB="$library" --env SYCL_CACHE_PERSISTENT=0 \
     --entrypoint /opt/venv/bin/python "$runtime" /lab/tests/check_sycl.py "$library" \
     | tee "$output/parity.log"
+mv -- "$output/inkling2-vllm.so.new" "$output/inkling2-vllm.so"

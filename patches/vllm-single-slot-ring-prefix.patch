@@ -1,0 +1,54 @@
+--- a/v1/core/kv_cache_manager.py
++++ b/v1/core/kv_cache_manager.py
+@@ -148,6 +148,8 @@
+         watermark: float = 0.0,
+         enable_mamba_shared_prefix_checkpoint: bool = False,
+     ) -> None:
++        from inkling_xpu.ring_prefix import RingPrefix
++        self.inkling_history = RingPrefix(hash_block_size)
+         self.max_model_len = max_model_len
+         # When unset, fall back to `max_model_len` so the recycling-aware cap
+         # collapses to the prior (uncapped) admission behavior. The scheduler
+@@ -300,11 +302,16 @@
+         # could slightly improve performance in the future.
+         if max_cache_hit_length is None:
+             max_cache_hit_length = request.num_tokens - 1
++        max_cache_hit_length = self.inkling_history.limit(request.block_hashes, max_cache_hit_length)
+         computed_blocks, num_new_computed_tokens, num_uncached = (
+             self.coordinator.find_longest_cache_hit(
+                 request.block_hashes, max_cache_hit_length
+             )
+         )
++
++        if num_new_computed_tokens and not self.inkling_history.covers(num_new_computed_tokens):
++            computed_blocks = self.empty_kv_cache_blocks.blocks
++            num_new_computed_tokens = num_uncached = 0
+ 
+         # When kv_cache_report_mode is "full", emit BlockStored events
+         # for the reused prefix cache blocks so that external consumers
+@@ -608,6 +615,7 @@
+             num_encoder_tokens,
+         )
+ 
++        self.inkling_history.scheduled(request.request_id, total_computed_tokens + num_new_tokens, num_new_tokens)
+         # P/D: delay caching blocks if we have to recv from
+         # remote. Update state for locally cached blocks.
+         if delay_cache_blocks:
+@@ -635,6 +643,9 @@
+             request: The request to free the blocks.
+ 
+         """
++        committed = min(request.num_tokens, request.num_computed_tokens) if request.status in (
++            RequestStatus.FINISHED_STOPPED, RequestStatus.FINISHED_LENGTH_CAPPED) else 0
++        self.inkling_history.finish(request.request_id, committed, request.block_hashes)
+         self.coordinator.free(request.request_id)
+ 
+     def remove_skipped_blocks(
+@@ -690,6 +701,7 @@
+             False otherwise.
+ 
+         """
++        self.inkling_history.hashes = ()
+         if not self.coordinator.reset_prefix_cache():
+             return False
+         if self.log_stats:

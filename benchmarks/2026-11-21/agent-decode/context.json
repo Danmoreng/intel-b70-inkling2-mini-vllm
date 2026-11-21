@@ -1,0 +1,87 @@
+[
+  {
+    "run": "ordinary-long-qualified-196608",
+    "prompt_tokens": 196608,
+    "input_sha256": "661e8b6cb928b82815b48f3ecd96901553b867a70990a85c2e2ef4589d53435f",
+    "output_tokens": 128,
+    "seed": 37,
+    "cached": null,
+    "retrieval_pass": true,
+    "truncated": false,
+    "engine_prefill_tps": 1390.760367003848,
+    "engine_decode_tps": 38.446869641759605,
+    "wall_seconds": 144.69908312500047
+  },
+  {
+    "run": "spec3-long-qualified-196608",
+    "prompt_tokens": 196608,
+    "input_sha256": "661e8b6cb928b82815b48f3ecd96901553b867a70990a85c2e2ef4589d53435f",
+    "output_tokens": 128,
+    "seed": 37,
+    "cached": null,
+    "retrieval_pass": true,
+    "truncated": false,
+    "engine_prefill_tps": 1389.453680083927,
+    "engine_decode_tps": 45.074817238406126,
+    "wall_seconds": 144.34577350799918
+  },
+  {
+    "run": "ordinary-long-qualified-262016",
+    "prompt_tokens": 262016,
+    "input_sha256": "301e9eacfeedf15ddc40a4caa660f2dc01876f6bbb2bb3deb8dc51587297c55e",
+    "output_tokens": 128,
+    "seed": 37,
+    "cached": null,
+    "retrieval_pass": true,
+    "truncated": false,
+    "engine_prefill_tps": 1293.1056779151786,
+    "engine_decode_tps": 31.12288076841709,
+    "wall_seconds": 206.7421193759983
+  },
+  {
+    "run": "spec3-long-qualified-262016",
+    "prompt_tokens": 262016,
+    "input_sha256": "301e9eacfeedf15ddc40a4caa660f2dc01876f6bbb2bb3deb8dc51587297c55e",
+    "output_tokens": 128,
+    "seed": 37,
+    "cached": null,
+    "retrieval_pass": true,
+    "truncated": false,
+    "engine_prefill_tps": 1288.351066158514,
+    "engine_decode_tps": 37.67717657426372,
+    "wall_seconds": 206.77997551899898
+  },
+  {
+    "run": "spec3-canonical-rollback",
+    "case": "initial",
+    "prompt_tokens": 8192,
+    "completion_tokens": 128,
+    "cached_tokens": 0,
+    "first_output_seconds": 5.237491177998891,
+    "wall_seconds": 10.924063241000113,
+    "client_decode_tps": 22.333314093793927,
+    "retrieval_pass": true
+  },
+  {
+    "run": "spec3-canonical-rollback",
+    "case": "rollback",
+    "prompt_tokens": 8215,
+    "completion_tokens": 128,
+    "cached_tokens": 8192,
+    "first_output_seconds": 1.214930509999249,
+    "wall_seconds": 2.581060188000265,
+    "client_decode_tps": 92.96335629413471,
+    "retrieval_pass": true
+  },
+  {
+    "run": "spec3-canonical-rollback",
+    "case": "isolated",
+    "prompt_tokens": 8215,
+    "completion_tokens": 128,
+    "cached_tokens": 0,
+    "first_output_seconds": 4.668395020999014,
+    "wall_seconds": 6.048968107999826,
+    "client_decode_tps": 91.99078353461,
+    "retrieval_pass": true
+  }
+]

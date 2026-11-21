@@ -1,7 +1,16 @@
 diff --git a/xpu/exl3xpu/inkling2/sgl_model.py b/xpu/exl3xpu/inkling2/sgl_model.py
-index 9eb7429..70c9983 100644
+index 9eb7429..134721c 100644
 --- a/xpu/exl3xpu/inkling2/sgl_model.py
 +++ b/xpu/exl3xpu/inkling2/sgl_model.py
+@@ -38,7 +38,7 @@ _FUSED_CONV = os.environ.get("INKLING2_FUSED_CONV", "1") == "1"
+ NSPLIT_SWA = int(os.environ.get("INKLING2_NSPLIT_SWA", "32"))
+ PREFILL_QTW = int(os.environ.get("INKLING2_PREFILL_QTW", "4"))
+ NSPLIT_G = int(os.environ.get("INKLING2_NSPLIT", "64"))
+-CONV_RING = 16
++CONV_RING = 64 if os.environ.get("INKLING2_RING_PREFIX", "0") == "1" else 16
+ N_CONV = 4
+ 
+ 
 @@ -75,7 +75,7 @@ class _LMHead(nn.Module):
  
  
@@ -78,7 +87,38 @@ index 9eb7429..70c9983 100644
          del raw
          if self.visual is not None:
              self.visual.to(dev)
-@@ -328,6 +333,27 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -204,6 +209,30 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             if k.startswith("attn_res.") or k.startswith("middle_cycle_cross_pass"):
+                 self.w[k] = self.w[k].float() * sc
+         self.n_block_slots = 12
++        self.native_mix = os.environ.get("INKLING2_NATIVE_DEPTH_MIX", "0") == "1"
++        self.group_controllers = os.environ.get("INKLING2_GROUP_CONTROLLERS", "0") == "1"
++        self.mix_cross_once = self.group_controllers or os.environ.get("INKLING2_MIX_CROSS_ONCE", "0") == "1"
++        if self.mix_cross_once:
++            from inkling_xpu.controller import mix_bank, pack_controller_weights, pack_cross_queries
++            self.mix_bank = mix_bank
++            self.cross_queries = pack_cross_queries(self.w["middle_cycle_cross_pass_queries"],
++                                                   self.w["middle_cycle_cross_pass_kv_queries"])
++            if self.group_controllers:
++                self.packed_ctrl = {il: pack_controller_weights(self, il) for il in self.core}
++        self.fixed_router = os.environ.get("INKLING2_FIXED_ROUTER", "0") == "1"
++        if self.fixed_router:
++            self.router_weights = {
++                il: self.f32[f"layers.{il}.mlp.gate.weight"].half().reshape(8,16,144,8,2)
++                    .permute(0,2,3,1,4).contiguous() for il in range(self.n_layers)}
++        self.use_sycl_router = os.environ.get("INKLING2_SYCL_ROUTER", "0") == "1"
++        self.control_lib = os.environ.get("INKLING2_CONTROL_LIB")
++        if self.control_lib:
++            torch.ops.load_library(self.control_lib)
++            self.loop_queries = {}
++            for il in self.core:
++                row = 2 * (il - self.core.start)
++                self.loop_queries[il] = torch.cat([self.w[key][row:row + 2] for key in
++                    ("middle_cycle_cross_pass_queries", "middle_cycle_cross_pass_kv_queries")]).contiguous()
+         self._idx_cache = {}
+         self._qkv_norm = {il: torch.stack([self.w[f"layers.{il}.{n}_input_norm.weight"].float() for n in "qkv"]).contiguous()
+                           for il in range(self.n_layers) if il not in self.local}
+@@ -328,6 +357,27 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          o = torch.cat(out)
          return (x.float() + o) / math.sqrt((2 if dynamic is not None else 1) * N_CONV + 1)
  
@@ -106,9 +146,17 @@ index 9eb7429..70c9983 100644
      def _attention(self, il, vi, inq, ink, inv, pos, reqs, fb, glob):
          p = f"layers.{il}.attn."
          T = inq.shape[0]
-@@ -360,12 +386,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
-                 o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
-                                      ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
+@@ -357,15 +407,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 kb, vb = self.swa_k[si], self.swa_v[si]
+                 rows = sl * RING + pos.remainder(RING)
+                 kb[rows] = kb16; vb[rows] = vb16
+-                o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
+-                                     ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
++                if getattr(self, "local_xmx", None):
++                    o = self.local_xmx(q, kb, vb, self.swa_pos, fb.seq_lens, pos, r, proj, sink)
++                else:
++                    o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
++                                         ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
              else:
 -                gi = self.visit_slot[vi]
 -                pool = self._kv_pool
@@ -120,9 +168,17 @@ index 9eb7429..70c9983 100644
              o = o.reshape(T, self.H * self.hd) * gate_s
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
-@@ -392,12 +413,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
-                 o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
-                                      ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
+@@ -389,15 +437,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 kb, vb = self.swa_k[si], self.swa_v[si]
+                 rows = sl * RING + pos.remainder(RING)
+                 kb[rows] = k.to(torch.bfloat16); vb[rows] = v.to(torch.bfloat16)
+-                o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
+-                                     ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
++                if getattr(self, "local_xmx", None):
++                    o = self.local_xmx(q, kb, vb, self.swa_pos, fb.seq_lens, pos, r, proj, sink)
++                else:
++                    o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
++                                         ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
              else:
 -                gi = self.visit_slot[vi]
 -                pool = self._kv_pool
@@ -134,7 +190,7 @@ index 9eb7429..70c9983 100644
              o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
-@@ -417,16 +433,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -417,16 +463,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              kb[self._ring_rows] = k[self._ring_src].to(torch.bfloat16)
              vb[self._ring_rows] = v[self._ring_src].to(torch.bfloat16)
          else:
@@ -152,7 +208,31 @@ index 9eb7429..70c9983 100644
          o = torch.cat(outs) if len(outs) > 1 else outs[0]
          o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
          o = self.L(p + "wo_ud.weight", o)
-@@ -450,7 +457,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -440,17 +477,29 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         gain, forget = torch.tanh(lgf(h)).split(sgf, -1)
+         return (1 - forget) * cur + gain * msg
+ 
++    def _control_norm(self, il, module, cur, msg, weight):
++        if not self.control_lib or not self._static:
++            return rms_norm(self._control(il, module, cur, msg), weight)
++        h = torch.ops.inkling2_xpu.control_input(cur, msg)
++        h = self.L(f"layers.{il}.controllers.{module}.down_weight", h)
++        project, _ = self.fused[(il, "gf" + module)]
++        return torch.ops.inkling2_xpu.control_output(cur, msg, project(h), weight)
++
+     def _moe(self, il, x):
+         p = f"layers.{il}.mlp."
+-        if x.shape[0] <= 8:
++        if self.use_sycl_router and x.shape[0] <= 8:
++            topi, topw = torch.ops.inkling2_xpu.route_small(x.contiguous(), self.f32[p + "gate.weight"],
++                self.f32[p + "gate.bias"], self.tc["route_scale"])
++        elif x.shape[0] <= 8:
+             topi, topw = route_gemv(x, self.f32[p + "gate.weight"], self.f32[p + "gate.bias"], self.tc["num_experts_per_tok"],
+                                     self.tc["route_scale"])
+         else:
+-            logits = F.linear(x.float(), self.f32[p + "gate.weight"])
++            logits = (torch.ops.inkling2_xpu.route_projection(x.float().contiguous(), self.router_weights[il])
++                      if self.fixed_router else F.linear(x.float(), self.f32[p + "gate.weight"]))
              topi, topw = froute(logits, self.f32[p + "gate.bias"], self.tc["num_experts_per_tok"], self.tc["route_scale"])
          return self.experts[il](x, topi, topw)
  
@@ -161,7 +241,7 @@ index 9eb7429..70c9983 100644
          dev = pos.device
          # new requests: invalidate their rings
          for (s, r0, n, p0) in reqs:
-@@ -458,11 +465,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -458,11 +507,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  self.swa_pos[s].fill_(-1)
                  self.conv_pos[s].fill_(-1)
          # global: paged keys 0 .. p0+n-1 of each request
@@ -179,20 +259,106 @@ index 9eb7429..70c9983 100644
          locs, starts, kp = [], [0], []
          if True:
              self._g_loc = self._g_kpos = self._g_start = None
-@@ -582,7 +590,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -582,7 +632,8 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              self._idx_cache[key] = t
          return t
  
 -    def _forward_body(self, input_ids, positions, fb, reqs, input_embeds=None):
 +    def _forward_body(self, input_ids, positions, fb, reqs, input_embeds=None, *, return_hidden=False):
++        mix = torch.ops.inkling2_xpu.depth_mix if self._static and self.native_mix else fmix
          pos = positions.long()
          T = input_ids.shape[0]
          extend_scratch = None if self._static else self._swa_scratch
-@@ -657,7 +665,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -594,7 +645,9 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         bbuf = torch.empty(self.n_block_slots, T, self.D, device=cur.device, dtype=torch.float32)
+         nslot = 0
+         blocks: list[int] = []
+-        prelude = bank = bank_last = None
++        prelude = bank = bank_last = cross_messages = None
++        draft = getattr(self, "active_draft", None)
++        features = []
+         qloop, kvloop = self.w["middle_cycle_cross_pass_queries"], self.w["middle_cycle_cross_pass_kv_queries"]
+         for vi, (il, pss) in enumerate(self.visits):
+             is_local = il in self.local
+@@ -606,27 +659,42 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                     else:
+                         bank, bank_last = blocks[len(prelude[0]) + 1:], cur
+                         blocks, cur = list(prelude[0]), prelude[1]
++                        if self.mix_cross_once and self._static:
++                            cross_messages = self.mix_bank(bbuf, bank, bank_last, self.cross_queries)
+                 if pss > 0:
+                     row = 2 * (il - self.core.start)
+                     bidx = self._idx(bank)
+-                    m_attn = fmix(bbuf, bidx, bank_last, qloop[row:row + 2])
+-                    m_kv = fmix(bbuf, bidx, bank_last, kvloop[row:row + 2])
+-                    msgs = (m_attn[0], m_kv[0], m_kv[1], m_attn[1])
++                    if cross_messages is not None:
++                        messages = cross_messages[il - self.core.start]
++                        msgs = messages.unbind(0)
++                    elif self.control_lib and self._static:
++                        m_attn, m_kv = mix(bbuf, bidx, bank_last, self.loop_queries[il]).split(2, 0)
++                    else:
++                        m_attn = mix(bbuf, bidx, bank_last, qloop[row:row + 2])
++                        m_kv = mix(bbuf, bidx, bank_last, kvloop[row:row + 2])
++                    if cross_messages is None:
++                        msgs = (m_attn[0], m_kv[0], m_kv[1], m_attn[1])
++            if draft is not None and vi in draft.taps[:-1]:
++                features.append(cur)
+             inp_sa = cur
+             a = f"layers.{il}."
+             nw = self.w[a + "attn_norm.weight"].float().view(1, -1) if is_local else self._qkv_norm[il]
+             if msgs is None:
+                 if il > 0:
+-                    mixed = fmix(bbuf, self._idx(blocks), cur, self.w[f"attn_res.attn_queries.{il - 1}"].view(-1, self.D), nw)
++                    mixed = mix(bbuf, self._idx(blocks), cur, self.w[f"attn_res.attn_queries.{il - 1}"].view(-1, self.D), nw)
+                     inputs = [mixed[0]] * 3 if is_local else [mixed[0], mixed[1], mixed[2]]
+                 else:
+                     x0 = rms_norm(cur, self.w[a + "attn_norm.weight"])
+                     inputs = [x0, x0, x0]
+             else:
+-                mixed = fmix(bbuf, self._idx(blocks), cur, self.w[f"attn_res.attn_queries.{il - 1}"].view(-1, self.D))
+-                raw = [mixed[0 if is_local else j] for j in range(3)]
+-                raw = [self._control(il, m, raw[j], msgs[j]) for j, m in enumerate(("attn", "k", "v"))]
+-                inputs = [rms_norm(raw[j], nw[0 if is_local else j]) for j in range(3)]
++                mixed = mix(bbuf, self._idx(blocks), cur, self.w[f"attn_res.attn_queries.{il - 1}"].view(-1, self.D))
++                if self.group_controllers and self._static:
++                    inputs = torch.ops.inkling2_xpu.control_many(
++                        mixed, messages, nw, *self.packed_ctrl[il], 0, 3).unbind(0)
++                else:
++                    raw = [mixed[0 if is_local else j] for j in range(3)]
++                    inputs = [self._control_norm(il, m, raw[j], msgs[j], nw[0 if is_local else j])
++                              for j, m in enumerate(("attn", "k", "v"))]
+             if _DEBUG:
+                 torch.xpu.synchronize(); logger.info("inkling2 visit %d layer %d pre-attn ok", vi, il)
+             att = self._attention(il, vi, *inputs, pos, reqs, fb, None)
+@@ -641,10 +709,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             mq = self.w[f"attn_res.mlp_queries.{il}"].view(1, -1)
+             mn = self.w[a + "mlp_norm.weight"].float().view(1, -1)
+             if msgs is None:
+-                x = fmix(bbuf, self._idx(blocks), cur, mq, mn)[0]
++                x = mix(bbuf, self._idx(blocks), cur, mq, mn)[0]
+             else:
+-                x = fmix(bbuf, self._idx(blocks), cur, mq)[0]
+-                x = rms_norm(self._control(il, "mlp", x, msgs[3]), mn[0])
++                x = mix(bbuf, self._idx(blocks), cur, mq)[0]
++                if self.group_controllers and self._static:
++                    x = torch.ops.inkling2_xpu.control_many(
++                        x.unsqueeze(0), messages, mn, *self.packed_ctrl[il], 3, 1)[0]
++                else:
++                    x = self._control_norm(il, "mlp", x, msgs[3], mn[0])
+             y = self._conv(vi, "mlp_out", self._moe(il, x), self.f32[a + "mlp_sconv.weight"], None, reqs, pos)
+             cur = ffn_inp + y
+         if not self._static:
+@@ -655,9 +727,11 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 m = min(n, RING)
+                 pp = torch.arange(p0 + n - m, p0 + n, device=pos.device)
                  self.swa_pos[s, pp.remainder(RING)] = pp.int()
-         h = fmix(bbuf, self._idx(blocks), cur, self.w["attn_res.output_query"].view(1, -1),
+-        h = fmix(bbuf, self._idx(blocks), cur, self.w["attn_res.output_query"].view(1, -1),
++        h = mix(bbuf, self._idx(blocks), cur, self.w["attn_res.output_query"].view(1, -1),
                   self.w["norm.weight"].float().view(1, -1))[0].to(torch.bfloat16)
 -        return self.logits_processor(input_ids, h, self.lm_head, fb)
++        if draft is not None:
++            draft.store([*features, h], pos)
 +        return h if return_hidden else self.logits_processor(input_ids, h, self.lm_head, fb)
  
  

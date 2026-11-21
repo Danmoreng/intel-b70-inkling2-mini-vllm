@@ -1,0 +1,37 @@
+--- a/v1/worker/gpu/spec_decode/__init__.py
++++ b/v1/worker/gpu/spec_decode/__init__.py
+@@ -19,6 +19,9 @@
+     """Build the speculator for this config."""
+     speculative_config = vllm_config.speculative_config
+     assert speculative_config is not None
++    if speculative_config.method == "custom_class" and speculative_config.model == "inkling_xpu.dspark.InklingDSparkSpeculator":
++        from inkling_xpu.dspark import InklingDSparkSpeculator
++        return InklingDSparkSpeculator(vllm_config, device)
+     if speculative_config.method == "extract_hidden_states":
+         from vllm.v1.worker.gpu.spec_decode.extract_hidden_states import (
+             ExtractHiddenStatesSpeculator,
+--- a/v1/worker/gpu/model_runner.py
++++ b/v1/worker/gpu/model_runner.py
+@@ -416,6 +416,8 @@
+                 )
+                 if self.pp_handler is not None:
+                     self.pp_handler.configure_aux_hidden_state_relay(self.model)
++            if self.speculator is not None and self.speculative_config.model == "inkling_xpu.dspark.InklingDSparkSpeculator":
++                self.speculator.target = self.model
+             if isinstance(self.speculator, DraftModelSpeculator):
+                 with use_workspace_lane(self._draft_workspace_lane):
+                     self.speculator.load_model(self.model)
+--- a/config/vllm.py
++++ b/config/vllm.py
+@@ -3064,7 +3064,10 @@
+             unsupported.append("pipeline parallelism with external_launcher")
+ 
+         if speculative_config is not None:
+-            if speculative_config.method in ("suffix", "custom_class"):
++            if speculative_config.method == "suffix" or (
++                speculative_config.method == "custom_class"
++                and speculative_config.model != "inkling_xpu.dspark.InklingDSparkSpeculator"
++            ):
+                 unsupported.append(f"speculative method '{speculative_config.method}'")
+ 
+             # V2 EagleSpeculator does not support parallel_drafting (for P-Eagle).

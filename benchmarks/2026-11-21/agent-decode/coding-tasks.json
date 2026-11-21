@@ -1,0 +1,359 @@
+{
+  "qwen_archive_sha256": "13fb6d02cb2c959fbc69862995d3c1265ffa69b67079a14a124baf10411039aa",
+  "qwen": [
+    {
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "success": true,
+      "hidden_tests": 8,
+      "output_tokens": 2421,
+      "tool_calls": 6,
+      "requests": 5,
+      "temperature": 1.0,
+      "effort": "medium",
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "wall_seconds": 45.37716141800047,
+      "engine_decode_tps": 66.53636915406487
+    },
+    {
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "success": true,
+      "hidden_tests": 8,
+      "output_tokens": 1642,
+      "tool_calls": 6,
+      "requests": 5,
+      "temperature": 1.0,
+      "effort": "medium",
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "wall_seconds": 27.456828082002176,
+      "engine_decode_tps": 67.44002431749796
+    },
+    {
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "success": true,
+      "hidden_tests": 9,
+      "output_tokens": 1568,
+      "tool_calls": 6,
+      "requests": 5,
+      "temperature": 1.0,
+      "effort": "medium",
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "wall_seconds": 26.841816856998776,
+      "engine_decode_tps": 66.16622667596307
+    },
+    {
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "success": true,
+      "hidden_tests": 9,
+      "output_tokens": 2499,
+      "tool_calls": 7,
+      "requests": 6,
+      "temperature": 1.0,
+      "effort": "medium",
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "wall_seconds": 46.20342235099815,
+      "engine_decode_tps": 59.64122901936669
+    }
+  ],
+  "inkling": [
+    {
+      "run": "spec3-panel-none-panel",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 44.464677100999324,
+      "output_tokens": 1726,
+      "engine_decode_tps": 52.723797265794936,
+      "proposed": 1764.0,
+      "accepted": 1140.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 31,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 716,
+          "cached": 672,
+          "out": 104,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1527,
+          "cached": 816,
+          "out": 1441,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3027,
+          "cached": 2960,
+          "out": 23,
+          "wall_seconds": null
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3168,
+          "cached": 3040,
+          "out": 127,
+          "wall_seconds": null
+        }
+      ]
+    },
+    {
+      "run": "spec3-panel-none-panel",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 30.43141993900099,
+      "output_tokens": 2069,
+      "engine_decode_tps": 74.44739898049954,
+      "proposed": 2211.0,
+      "accepted": 1332.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 31,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 716,
+          "cached": 672,
+          "out": 104,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1527,
+          "cached": 816,
+          "out": 1790,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3389,
+          "cached": 3312,
+          "out": 23,
+          "wall_seconds": null
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3530,
+          "cached": 3408,
+          "out": 121,
+          "wall_seconds": null
+        }
+      ]
+    },
+    {
+      "run": "spec3-panel-none-panel",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 24.168472695000673,
+      "output_tokens": 1482,
+      "engine_decode_tps": 67.23757269315419,
+      "proposed": 1746.0,
+      "accepted": 898.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1100,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 2730,
+          "cached": 2656,
+          "out": 79,
+          "wall_seconds": null
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 2945,
+          "cached": 2800,
+          "out": 168,
+          "wall_seconds": null
+        }
+      ]
+    },
+    {
+      "run": "spec3-panel-none-panel",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 29.209405760000664,
+      "output_tokens": 1883,
+      "engine_decode_tps": 69.68918189042002,
+      "proposed": 2130.0,
+      "accepted": 1173.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1571,
+          "wall_seconds": null
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3206,
+          "cached": 3136,
+          "out": 23,
+          "wall_seconds": null
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3365,
+          "cached": 3216,
+          "out": 154,
+          "wall_seconds": null
+        }
+      ]
+    }
+  ]
+}

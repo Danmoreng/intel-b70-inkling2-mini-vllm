@@ -1,0 +1,110 @@
+{
+  "ordinary-fixed": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1904.0507563251963,
+      "decode_tps": 53.059145771763404
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1900.5665049579545,
+      "decode_tps": 53.007246222045055
+    }
+  ],
+  "ordinary-depth": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1900.079557898245,
+      "decode_tps": 59.28594177140239
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1895.7760953357276,
+      "decode_tps": 59.23451247925713
+    }
+  ],
+  "ordinary-combined": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1901.3357400191321,
+      "decode_tps": 59.91814743238352
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1900.8706746935793,
+      "decode_tps": 59.8712392722389
+    }
+  ],
+  "spec3-qualified": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1856.2135634900624,
+      "decode_tps": 95.09986325440569
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1853.1905881720809,
+      "decode_tps": 92.41988855228144
+    }
+  ],
+  "spec3-combined": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1849.9579233033212,
+      "decode_tps": 101.67332558234742
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1837.5953935875486,
+      "decode_tps": 96.3415976045036
+    }
+  ],
+  "spec3-q8head0": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1857.184317006547,
+      "decode_tps": 99.19915708162266
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1847.307879870479,
+      "decode_tps": 94.02094089031816
+    }
+  ]
+}

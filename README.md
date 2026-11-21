@@ -2,8 +2,9 @@
 
 Serve [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini)
 on a single **32 GB Intel Arc Pro B70** using vLLM 0.33, 4-bit EXL3
-experts and native SYCL kernels. A separate llama.cpp recipe runs the
-Unsloth 4-bit GGUF with the DSpark drafter.
+experts and native SYCL kernels. The vLLM endpoint supports ordinary decoding,
+the checkpoint's DSpark drafter, streamed tool calls and single-sequence
+prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 
 ## Validated profile
 
@@ -15,10 +16,18 @@ Unsloth 4-bit GGUF with the DSpark drafter.
 | Context | 262,144 input and output tokens combined |
 | Prefill | Grouped XMX expert GEMM, 2,048-token chunks, oneDNN prefix SDPA |
 | KV cache | FP8 E4M3, 4 GiB + 16 MiB |
-| Serving | Text, one sequence, TP1, eager, prefix caching off |
+| Serving | Text and tools, one sequence, TP1, native XPU decode graphs, validated prefix reuse |
 | API | `http://127.0.0.1:8093/v1`, model `inkling2-mini-exl3-b70` |
 
-## Measured performance
+## Coding and decode measurements
+
+In a single-agent replay of three short source reviews (about 5,000 Inkling prompt tokens and 1,024 generated tokens each), the B70 delivered **62.9 output tokens/s** at the streaming client using probabilistic DSpark proposals and block verification. The published full-context checkout repeated these three reviews at **63.7 tok/s**. The archived Qwen median for the same source text was 60.6. An earlier greedy DSpark profile reached 53.1 tok/s on these reviews. In a separate warm, greedy-output 4K kernel screen, native depth mixing and grouped controllers reached **59.9 tok/s ordinary** and **96.3–101.7 tok/s with DSpark**.
+
+The earlier long-context profile measured **1,389 prefill / 45.1 decode tok/s** with DSpark at 196,608 input tokens and **1,288 / 37.7** at 262,016. Ordinary decode was **38.4** and **31.1 tok/s**, respectively. All four prompts retrieved the inserted code. The coding fixtures also check task completion with hidden tests. [Measurements, settings and reproduction](benchmarks/2026-11-21/agent-decode/README.md)
+
+The full-context checkout with tool support and prefix reuse reached **57.7–57.9 tok/s ordinary** and **93.5–99.0 tok/s with DSpark** on the two warm 4K kernel-screen prompts. [Full-profile verification and cache results](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
+
+## Original prefill measurements
 
 Measured on November 21, 2026 with one request at a time and 128 completion
 tokens. The A/B rows use the same tokenized prompts. The 4K row is the second
@@ -52,10 +61,8 @@ bash scripts/check-sycl.sh
 bash scripts/check-sycl.sh exl3
 INKLING2_EXL3_TILE_ROWS=32 bash scripts/check-sycl.sh exl3 --tokens 256 512
 
-INKLING2_VLLM_BATCH=2048 INKLING2_EXL3_PREFILL_MIN=256 INKLING2_VLLM_KV_TYPE=fp8_e4m3 \
-  INKLING2_ONEDNN_PREFIX_BLOCK=8192 \
-  INKLING2_EXL3_MOE_LIB=/lab/.work/build/inkling2-exl3-moe-mb32.so \
-  bash scripts/serve-vllm-exl3.sh 262144 --kv-cache-memory-bytes 4311744512
+bash scripts/build-loop-control.sh
+bash scripts/serve-coding-agent.sh dspark
 ```
 
 In a second terminal, check readiness and run a short benchmark:
@@ -67,10 +74,14 @@ python3 scripts/bench-sycl-baseline.py --url http://127.0.0.1:8093 \
   --timeout 90 --output results/vllm-4k.jsonl
 ```
 
-For DSpark, use the [llama.cpp build and launch commands](docs/SETUP.md#llamacpp-and-dspark).
-On the same B70 at 4K, the GGUF recipe measured **33.3 tok/s decode with
-DSpark** and 26.5 tok/s with ordinary decode. The vLLM numbers above use
-ordinary decode.
+Use `bash scripts/serve-coding-agent.sh ordinary` to run the same endpoint
+with ordinary decoding. Both modes support the OpenAI-compatible chat and
+completion endpoints, including automatic tool calls on chat requests.
+The 262,144-token limit includes the generated continuation.
+
+For the earlier GGUF comparison, the llama.cpp recipe measured 33.3 tok/s
+with DSpark and 26.5 tok/s with ordinary decode at 4K.
+[llama.cpp build and launch commands](docs/SETUP.md#llamacpp-and-dspark)
 
 ## How the kernels work
 

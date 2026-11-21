@@ -1,5 +1,5 @@
 diff --git a/xpu/csrc/inkling2_ops.sycl b/xpu/csrc/inkling2_ops.sycl
-index 9dcffac..bc34ca5 100644
+index 9dcffac..6b733cc 100644
 --- a/xpu/csrc/inkling2_ops.sycl
 +++ b/xpu/csrc/inkling2_ops.sycl
 @@ -343,13 +343,14 @@ void dequant(at::Tensor W, at::Tensor S, std::optional<at::Tensor> alpha, at::Te
@@ -96,16 +96,94 @@ index 9dcffac..bc34ca5 100644
          PG ? r2t->stride(0) : 0, rrel.stride(0), rrel.stride(1), sink.stride(0), sink.stride(1), scale, (float)kscale, (float)vscale)
  #define DA_NQ(F8, PG) if (nq == 1) DA(1, F8, PG); else if (nq == 2) DA(2, F8, PG); else if (nq <= 4) DA(4, F8, PG); else DA(8, F8, PG)
      TORCH_CHECK(nq == 1 || nq == 2 || nq == 4 || nq == 8, "nq in {1,2,4,8}");
-@@ -519,7 +544,7 @@ constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+@@ -517,18 +542,35 @@ using fp16 = sycl::half;
+ constexpr int QR = 8, KT = 16, KBT = 2, KB = KT * KBT;
+ constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
  
- template <int D>
+-template <int D>
++template <int D, bool split_block = false>
  struct Kern {
 -    const fp16* q; const fp16* k; const fp16* v; float* o;
 +    const fp16* q; const fp16* k; const fp16* v; float* o; float* lse;
      const uint16_t* table; const float* sink;
      int Lq, Lk, Hq, Hk, G, qpos0, kpos0, window, E, QTW;
      float scale_log2;
-@@ -640,6 +665,8 @@ struct Kern {
++    const int32_t* block_start = nullptr;
++    int splits = 1, ring_capacity = 0, history_window = 0;
+ 
+     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+         constexpr int NC = D / 16;
+         // work-group = G heads x QTW adjacent query tiles of one kv head (they stream the same keys: L1 sharing)
+         int id = it.get_global_id(0);
+         int g = id % G, t1 = id / G, qti = t1 % QTW, t2 = t1 / QTW, kvh = t2 % Hk, qt = (t2 / Hk) * QTW + qti;
++        int part = 0, offset = 0, length = Lk, absolute_q = qpos0, absolute_k = kpos0;
++        if constexpr (split_block) {
++            // The draft's eight queries see the whole noise block. A doubled
++            // local ring exposes the wrapped history as one contiguous surface.
++            const int input_start = block_start[0];
++            const int max_start = ring_capacity ? 0x3fffffff : Lk - Lq;
++            const int start = input_start < 0 ? 0 : input_start > max_start ? max_start : input_start;
++            const int begin = history_window && start > history_window ? start - history_window : 0;
++            part = id / Hq;
++            qt = 0;
++            length = start - begin + Lq;
++            offset = ring_capacity ? begin % ring_capacity : 0;
++            absolute_q = length;
++            absolute_k = 0;
++        }
+         int q0 = qt * QR;
+         if (q0 >= Lq) return;
+         int h = kvh * G + g;
+@@ -549,14 +591,19 @@ struct Kern {
+             m[r] = (sink && live) ? sink[(size_t)(q0 + r) * Hq + h] * LOG2E : NEG;
+             l[r] = (sink && live) ? 1.0f : 0.0f;
+         }
+-        const int qmin = qpos0 + q0, qmax = qpos0 + (q0 + QR < Lq ? q0 + QR : Lq) - 1;
+-        int hi = qmax - kpos0 + 1; if (hi > Lk) hi = Lk;
++        const int qmin = absolute_q + q0, qmax = absolute_q + (q0 + QR < Lq ? q0 + QR : Lq) - 1;
++        int hi = qmax - absolute_k + 1; if (hi > length) hi = length;
+         int lo = 0;
+-        if (window > 0) { lo = qmin - window + 1 - kpos0; if (lo < 0) lo = 0; }
++        if (window > 0) { lo = qmin - window + 1 - absolute_k; if (lo < 0) lo = 0; }
+         lo = lo / KB * KB;
+-        const uint32_t* kb32 = reinterpret_cast<const uint32_t*>(k + (size_t)kvh * D);
+-        const fp16* vbase = v + (size_t)kvh * D;
+-        unsigned surfW = D * 2 - 1, surfH = (unsigned)Lk - 1, pitch = (unsigned)Hk * D * 2 - 1;
++        if constexpr (split_block) {
++            const int tiles_per_split = (length + splits * KB - 1) / (splits * KB);
++            lo = part * tiles_per_split * KB;
++            hi = length < lo + tiles_per_split * KB ? length : lo + tiles_per_split * KB;
++        }
++        const uint32_t* kb32 = reinterpret_cast<const uint32_t*>(k + ((size_t)offset * Hk + kvh) * D);
++        const fp16* vbase = v + ((size_t)offset * Hk + kvh) * D;
++        unsigned surfW = D * 2 - 1, surfH = (unsigned)length - 1, pitch = (unsigned)Hk * D * 2 - 1;
+         for (int kb0 = lo; kb0 < hi; kb0 += KB) {
+             simd<float, KBT * QR * KT> S;
+ #pragma unroll
+@@ -571,8 +618,8 @@ struct Kern {
+                 }
+                 S.template select<QR * KT, 1>(t * QR * KT) = acc * scale_log2;
+             }
+-            const int kpmin = kpos0 + kb0, kpmax = kpos0 + kb0 + KB - 1;
+-            const bool need_mask = (kb0 + KB > Lk) || (kpmax > qmin) || (window > 0 && qmax - kpmin >= window);
++            const int kpmin = absolute_k + kb0, kpmax = absolute_k + kb0 + KB - 1;
++            const bool need_mask = (kb0 + KB > length) || (kpmax > qmin) || (window > 0 && qmax - kpmin >= window);
+             const bool need_bias = table && (qmin - kpmax < E);
+             if (need_mask || need_bias) {
+                 simd<int, KT> lane(0, 1);
+@@ -581,9 +628,9 @@ struct Kern {
+ #pragma unroll
+                     for (int r = 0; r < QR; ++r) {
+                         simd<int, KT> kj = lane + (kb0 + t * KT);
+-                        simd<int, KT> dist = (qpos0 + q0 + r) - (kj + kpos0);
++                        simd<int, KT> dist = (absolute_q + q0 + r) - (kj + absolute_k);
+                         simd<float, KT> sv = S.template select<KT, 1>((t * QR + r) * KT);
+-                        simd_mask<KT> bad = (kj >= Lk) | (dist < 0);
++                        simd_mask<KT> bad = (kj >= length) | (dist < 0);
+                         if (window > 0) bad |= dist >= window;
+                         if (q0 + r >= Lq) bad = 1;
+                         if (need_bias) {
+@@ -640,6 +687,8 @@ struct Kern {
          simd<float, QR> inv;
  #pragma unroll
          for (int r = 0; r < QR; ++r) { float lr = l[r]; inv[r] = lr > 0.f ? 1.0f / lr : 0.f; }
@@ -114,17 +192,191 @@ index 9dcffac..bc34ca5 100644
  #pragma unroll
          for (int r = 0; r < QR; ++r) {
              if (q0 + r >= Lq) break;
-@@ -647,20 +674,24 @@ struct Kern {
+@@ -647,20 +696,198 @@ struct Kern {
              const float ir = inv[r];
  #pragma unroll
              for (int c = 0; c < NC; ++c) row.template select<16, 1>(c * 16) = simd<float, 16>(O.template select<16, 1>((c * QR + r) * 16)) * ir;
 -            block_store<float, D>(o + ((size_t)(q0 + r) * Hq + h) * D, row);
-+            const size_t row_index = (size_t)(q0 + r) * Hq + h;
++            const size_t row_index = ((size_t)part * Lq + q0 + r) * Hq + h;
 +            block_store<float, D>(o + row_index * D, row);
 +            if (lse) lse[row_index] = normalizer[r];
++        }
++    }
++};
++// Eight query rows (including GQA heads) share one FP8 cache tile. The
++// allocator stores keys and values in two halves of a physical vLLM page.
++template <int N>
++ESIMD_INLINE simd<fp16, N> from_e4m3(simd<uint8_t, N> bytes) {
++    simd<uint16_t, N> u = convert<uint16_t>(bytes);
++    simd<uint16_t, N> mag = u & 127;
++    simd<uint16_t, N> normal = (mag << 7) + (8 << 10);
++    // In model caches the E4M3 NaN bit pattern is invalid input.
++    simd<fp16, N> tiny = convert<fp16>(mag & 7) * fp16(0.001953125f);
++    normal.merge(tiny.template bit_cast_view<uint16_t>().read(), mag < 8);
++    normal |= (u & 128) << 8;
++    return normal.template bit_cast_view<fp16>().read();
++}
++
++template <int M, bool Local = false, bool Draft = false>
++struct PagedXmx {
++    const fp16* q;
++    const uint8_t *k, *v;
++    const int *pages, *length, *positions;
++    const float *table, *sink;
++    float *output, *lse;
++    int splits, page_size, block_stride, token_stride, head_stride, extent;
++    bool packed = false;
++
++    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
++        constexpr int R = 3 * M, tiles = (R + 7) / 8;
++        int id = it.get_global_id(0);
++        const int tile = id % tiles, hk = (id / tiles) % 8, part = id / (tiles * 8);
++        int start = positions[0], L = Draft ? start + 8 : length[0];
++        const int lo = Local && start >= 1024 ? (start - 1023) / 16 : 0;
++        const int chunks = (L + 15) / 16, per = (chunks - lo + splits - 1) / splits;
++        const int first = lo + part * per, last = (chunks < first + per ? chunks : first + per);
++        simd<fp16, 1024> Q = 0;
++        simd<float, 1024> O = 0;
++        simd<float, 8> m = NEG, total = 0.f;
++#pragma unroll
++        for (int row = 0; row < 8; ++row) {
++            int r = tile * 8 + row;
++            if (r < R) {
++                int qh = (r / 3) * 24 + hk * 3 + r % 3;
++                auto qr = block_load<fp16, 128>(q + qh * 128);
++#pragma unroll
++                for (int c = 0; c < 8; ++c)
++                    Q.template select<16,1>((c * 8 + row) * 16) = qr.template select<16,1>(c * 16);
++                if constexpr (!Draft) {
++                    if (part == 0) { m[row] = sink[qh] * LOG2E; total[row] = 1.f; }
++                }
++            }
++        }
++        for (int chunk = first; chunk < last; ++chunk) {
++            int index = chunk * 16;
++            const size_t off = Draft ? size_t(index) * token_stride : Local ? size_t(index % page_size) * token_stride :
++                size_t(pages[index / page_size]) * block_stride + size_t(index % page_size) * token_stride;
++            const size_t base = off + size_t(hk) * head_stride;
++            size_t packed_base = 0;
++            if constexpr (!Local && !Draft) {
++                if (packed) packed_base = size_t(pages[index / page_size]) * block_stride +
++                    size_t(hk) * page_size * 256 + (index % page_size) / 16 * 4096;
++            }
++            simd<float, 128> score = 0;
++#pragma unroll
++            for (int c = 0; c < 8; ++c) {
++                simd<uint32_t, 128> k2;
++                if constexpr (Local) {
++                    auto kt = xesimd::lsc_load_2d<uint32_t,8,16,1,true,false,
++                        xesimd::cache_hint::cached,xesimd::cache_hint::cached>(
++                        reinterpret_cast<const uint32_t*>(k + 2 * base),255,15,2 * token_stride - 1,c * 8,0);
++                    simd<uint32_t,256> bits = convert<uint32_t>(kt.template bit_cast_view<uint16_t>().read()) << 16;
++                    simd<fp16,256> vals = convert<fp16>(bits.template bit_cast_view<float>().read());
++                    k2 = vals.template bit_cast_view<uint32_t>().read();
++                } else {
++                simd<uint32_t,64> k4;
++                if (!Draft && packed)
++                    k4 = block_load<uint32_t,64>(reinterpret_cast<const uint32_t*>(k + packed_base + c*256));
++                else k4 = xesimd::lsc_load_2d<uint32_t, 4, 16, 1, true, false,
++                    xesimd::cache_hint::cached, xesimd::cache_hint::cached>(
++                    reinterpret_cast<const uint32_t*>(k + base), 127, 15, token_stride - 1, c * 4, 0);
++
++#pragma unroll
++                for (int d = 0; d < 4; ++d) {
++                    simd<uint32_t,16> four = k4.template select<16,1>(d * 16);
++                    simd<uint16_t,16> lo = convert<uint16_t>(four), hi = convert<uint16_t>(four >> 16);
++                    auto val_lo = from_e4m3<32>(lo.template bit_cast_view<uint8_t>().read());
++                    k2.template select<16,1>(d * 32) = val_lo.template bit_cast_view<uint32_t>().read();
++                    auto val_hi = from_e4m3<32>(hi.template bit_cast_view<uint8_t>().read());
++                    k2.template select<16,1>(d * 32 + 16) = val_hi.template bit_cast_view<uint32_t>().read();
++                }
++                }
++                score = xmx::dpas<8,8,float,float,fp16,fp16>(score, k2.template bit_cast_view<fp16>().read(),
++                         simd<fp16,128>(Q.template select<128,1>(c * 128)));
++            }
++            score *= LOG2E * 0.08838834764831844f;
++            simd<float,8> alpha;
++            simd<fp16,128> P;
++#pragma unroll
++            for (int row = 0; row < 8; ++row) {
++                const int r = tile * 8 + row;
++                simd<float,16> s = score.template select<16,1>(row * 16);
++                if constexpr (Draft) {
++                    simd<int,16> key(index,1);
++                    s.merge(NEG, key >= L);
++                } else if (Local || index + 15 >= start - extent + 1) {
++                    simd<int,16> key(index,1), delta = start + r / 3 - key;
++                    simd_mask<16> valid = (delta >= 0) & (key < L) & (r < R);
++                    if constexpr (Local) {
++                        const auto stored = block_load<int,16>(pages + index % page_size);
++                        valid &= (delta < 1024) & (stored == key);
++                    }
++                    simd_mask<16> near = valid & (delta < extent);
++                    const int qh = (r / 3) * 24 + hk * 3 + r % 3;
++                    simd<uint32_t,16> offset = convert<uint32_t>(max(delta,simd<int,16>(0))) * 4;
++                    if (r < R) {
++                        auto bias = gather<float,16>(table + qh * extent, offset, near);
++                        s.merge(s + bias * LOG2E, near);
++                    }
++                    s.merge(NEG, !valid);
++                }
++                const float peak = hmax<float>(s); const float mx = m[row] > peak ? float(m[row]) : peak;
++                alpha[row] = exp2(simd<float,1>(m[row]-mx))[0];
++                simd<float,16> p = exp2(s - mx);
++                p.merge(0.f,s < NEG * 0.5f);
++                P.template select<16,1>(row * 16) = convert<fp16>(p);
++                total[row] = total[row] * alpha[row] + reduce<float>(p,std::plus<>());
++                m[row] = mx;
++            }
++            auto rescale = alpha.template replicate_vs_w_hs<8,1,16,0>(0);
++#pragma unroll
++            for (int c = 0; c < 8; ++c) {
++                simd<uint32_t,128> v2;
++                if constexpr (Local) {
++                    auto vt = xesimd::lsc_load_2d<uint16_t,16,16,1,false,true,
++                        xesimd::cache_hint::cached,xesimd::cache_hint::cached>(
++                        reinterpret_cast<const uint16_t*>(v + 2 * base),255,15,2 * token_stride - 1,c * 16,0);
++                    simd<uint32_t,256> bits = convert<uint32_t>(vt) << 16;
++                    simd<fp16,256> vals = convert<fp16>(bits.template bit_cast_view<float>().read());
++                    v2 = vals.template bit_cast_view<uint32_t>().read();
++                } else {
++                simd<uint8_t,256> v4;
++                if (!Draft && packed)
++                    v4 = block_load<uint8_t,256>(k + packed_base + 2048 + c*256);
++                else v4 = xesimd::lsc_load_2d<uint8_t,16,16,1,false,true,
++                    xesimd::cache_hint::cached, xesimd::cache_hint::cached>(v + base,127,15,token_stride - 1,c * 16,0);
++
++#pragma unroll
++                for (int d = 0; d < 4; ++d) {
++                    simd<uint32_t,16> four = v4.template bit_cast_view<uint32_t>().template select<16,1>(16 * d);
++                    simd<uint16_t,16> lo = convert<uint16_t>(four), hi = convert<uint16_t>(four >> 16);
++                    auto val_lo = from_e4m3<32>(lo.template bit_cast_view<uint8_t>().read());
++                    v2.template select<16,1>(d*32) = val_lo.template bit_cast_view<uint32_t>().read();
++                    auto val_hi = from_e4m3<32>(hi.template bit_cast_view<uint8_t>().read());
++                    v2.template select<16,1>(d*32 + 16) = val_hi.template bit_cast_view<uint32_t>().read();
++                }
++                }
++                simd<float,128> acc = simd<float,128>(O.template select<128,1>(c * 128)) * rescale;
++                O.template select<128,1>(c * 128) = xmx::dpas<8,8,float,float,fp16,fp16>(
++                    acc, v2.template bit_cast_view<fp16>().read(), P);
++            }
++        }
++#pragma unroll
++        for (int row = 0; row < 8; ++row) {
++            int r = tile * 8 + row;
++            if (r >= R) break;
++            int dest = part * M * 24 + (r / 3) * 24 + hk * 3 + r % 3;
++            simd<float,128> o;
++            float den = total[row];
++#pragma unroll
++            for (int c = 0; c < 8; ++c)
++                o.template select<16,1>(16*c) = O.template select<16,1>((c*8+row)*16);
++            block_store<float,128>(output + dest * 128, o * (den > 0 ? 1.f / den : 0.f));
++            lse[dest] = den > 0 ? (float(m[row]) + float(log2(simd<float,1>(den))[0])) / LOG2E : NEG;
          }
      }
  };
++
  }  // namespace fa
  
  void prefill_attn(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o, std::optional<at::Tensor> table, std::optional<at::Tensor> sink,
@@ -142,7 +394,173 @@ index 9dcffac..bc34ca5 100644
                         table ? reinterpret_cast<const uint16_t*>(table->data_ptr()) : nullptr, sink ? sink->data_ptr<float>() : nullptr,
                         Lq, Lk, Hq, Hk, Hq / Hk, (int)qpos0, (int)kpos0, (int)window, table ? (int)table->size(2) : 0, (int)qtw,
                         (float)(fa::LOG2E / sycl::sqrt(128.0))};
-@@ -680,7 +711,7 @@ TORCH_LIBRARY(inkling2_xpu, m) {
+@@ -671,16 +898,173 @@ void prefill_attn(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o, std::o
+     qu.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>(n, wg), kern); });
+ }
+ 
++// Noncausal DSpark block: the K/V cache contains the context and eight
++// freshly projected block rows. Each key split returns a normalized partial.
++void dspark_attention(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start,
++                      at::Tensor out, at::Tensor lse, int64_t capacity, int64_t window) {
++    TORCH_CHECK(q.is_xpu() && q.scalar_type() == at::kHalf && q.is_contiguous() && q.dim() == 3 &&
++                q.size(0) == 8 && q.size(1) == 24 && q.size(2) == 128);
++    TORCH_CHECK(k.device() == q.device() && v.device() == q.device() && k.scalar_type() == at::kHalf &&
++                v.scalar_type() == at::kHalf && k.is_contiguous() && v.is_contiguous() && k.sizes() == v.sizes() &&
++                k.dim() == 3 && k.size(0) >= 8 && k.size(1) == 8 && k.size(2) == 128);
++    TORCH_CHECK(start.device() == q.device() && start.scalar_type() == at::kInt && start.numel() == 1 &&
++                capacity >= 0 && window >= 0 && ((!capacity && !window) ||
++                (capacity >= window + 8 && k.size(0) == capacity * 2)));
++    TORCH_CHECK(out.device() == q.device() && lse.device() == q.device() && out.scalar_type() == at::kFloat &&
++                lse.scalar_type() == at::kFloat && out.is_contiguous() && lse.is_contiguous() && out.dim() == 4 &&
++                out.size(0) > 0 && out.size(1) == 8 && out.size(2) == 24 && out.size(3) == 128 &&
++                lse.dim() == 3 && lse.size(0) == out.size(0) && lse.size(1) == 8 && lse.size(2) == 24);
++    const int splits = out.size(0);
++    fa::Kern<128, true> kernel{reinterpret_cast<const sycl::half*>(q.data_ptr()),
++        reinterpret_cast<const sycl::half*>(k.data_ptr()), reinterpret_cast<const sycl::half*>(v.data_ptr()),
++        out.data_ptr<float>(), lse.data_ptr<float>(), nullptr, nullptr, 8, int(k.size(0)), 24, 8, 3, 0, 0,
++        0, 0, 1, float(fa::LOG2E / sycl::sqrt(128.0)), start.data_ptr<int32_t>(), splits, int(capacity), int(window)};
++    auto& queue = queue_of(q);
++    queue.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>(splits * 24, 3), kernel); });
++}
++
++// Pack at write time into the VNNI/transpose order consumed by XMX. Each
++// 16-token, one-KV-head tile occupies 4096 bytes inside vLLM's physical page.
++void packed_kv_store(at::Tensor arena, at::Tensor rows, at::Tensor key, at::Tensor value) {
++    TORCH_CHECK(arena.is_xpu() && arena.dim() == 4 && arena.scalar_type() == at::kByte &&
++                arena.size(1) == 8 && arena.size(2) % 16 == 0 && arena.size(3) == 256 &&
++                arena.stride(0) >= arena.size(1) * arena.size(2) * arena.size(3));
++    TORCH_CHECK(rows.device() == arena.device() && rows.scalar_type() == at::kLong && rows.is_contiguous());
++    for (const auto &t: {key,value}) TORCH_CHECK(t.device() == arena.device() && t.scalar_type() == at::kByte &&
++                t.is_contiguous() && t.sizes() == at::IntArrayRef({rows.numel(),8,128}));
++    const int64_t stride = arena.stride(0);
++    const int pg = arena.size(2);
++    const auto *where = rows.data_ptr<int64_t>();
++    auto *dst = arena.data_ptr<uint8_t>();
++    const auto *k = key.data_ptr<uint8_t>(), *v = value.data_ptr<uint8_t>();
++    queue_of(arena).parallel_for(sycl::range<1>(key.numel()),[=](sycl::id<1> id) {
++        const int i=id[0], d=i%128, h=(i/128)%8;
++        const int64_t physical=where[i/1024];
++        if(physical<0) return;
++        const int within=physical%pg, t=within%16;
++        const auto base=(physical/pg)*stride+h*pg*256+(within/16)*4096+(d/16)*256;
++        dst[base+(d%16/4)*64+t*4+d%4]=k[i];
++        dst[base+2048+(t/4)*64+(d%16)*4+t%4]=v[i];
++    });
++}
++
++void paged_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor length,
++               at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse, bool packed) {
++    const int M = q.size(0), splits = out.size(0);
++    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
++                q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
++    TORCH_CHECK(k.dim() == 4 && k.size(1) % 16 == 0 && k.size(1) >= 16 && k.size(2) == 8 && k.size(3) == 128 &&
++                k.stride(3) == 1 && k.strides() == v.strides() && k.sizes() == v.sizes() &&
++                k.scalar_type() == at::kFloat8_e4m3fn && v.scalar_type() == k.scalar_type());
++    for (const auto &t: {k,v,pages,length,positions,table,sink,out,lse}) TORCH_CHECK(t.device() == q.device());
++    for (const auto &t: {pages,length,positions,table,sink,out,lse}) TORCH_CHECK(t.is_contiguous());
++    TORCH_CHECK(pages.scalar_type() == at::kInt && pages.dim() == 2 && pages.size(0) == 1 &&
++                length.scalar_type() == at::kInt && length.numel() == 1 && positions.scalar_type() == at::kInt &&
++                positions.numel() == M && table.scalar_type() == at::kFloat && table.dim() == 3 &&
++                table.size(0) == M && table.size(1) == 24 && table.size(2) > 0 &&
++                sink.scalar_type() == at::kFloat && sink.numel() == M*24 && splits > 0 &&
++                out.scalar_type() == at::kFloat && out.numel() == int64_t(splits)*M*24*128 &&
++                lse.scalar_type() == at::kFloat && lse.numel() == int64_t(splits)*M*24);
++    auto& queue = queue_of(q);
++    auto launch = [&]<int Rows>() {
++        fa::PagedXmx<Rows> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()),
++            reinterpret_cast<const uint8_t*>(k.data_ptr()), reinterpret_cast<const uint8_t*>(v.data_ptr()),
++            pages.data_ptr<int>(),length.data_ptr<int>(),positions.data_ptr<int>(),table.data_ptr<float>(),
++            sink.data_ptr<float>(),out.data_ptr<float>(),lse.data_ptr<float>(),
++            splits,int(k.size(1)),int(k.stride(0)),int(k.stride(1)),int(k.stride(2)),int(table.size(2)),packed};
++        const size_t n = splits * 8 * ((Rows*3+7)/8);
++        queue.submit([&](sycl::handler& h) {h.parallel_for(sycl::nd_range<1>(n,1),kern);});
++    };
++    switch (M) {
++        case 1: launch.template operator()<1>(); break;
++        case 2: launch.template operator()<2>(); break;
++        case 3: launch.template operator()<3>(); break;
++        case 4: launch.template operator()<4>(); break;
++        case 5: launch.template operator()<5>(); break;
++        case 6: launch.template operator()<6>(); break;
++        case 7: launch.template operator()<7>(); break;
++        case 8: launch.template operator()<8>(); break;
++    }
++}
++
++// DSpark global context and the eight jointly visible query-block rows share
++// one contiguous E4M3 cache. The last physical tile is explicitly padded.
++void draft_global_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start,
++                      at::Tensor out, at::Tensor lse) {
++    const int splits = out.size(0);
++    TORCH_CHECK(q.is_xpu() && q.scalar_type() == at::kHalf && q.sizes() == at::IntArrayRef({8,24,128}));
++    for (const auto &t: {q,k,v,start,out,lse}) TORCH_CHECK(t.is_contiguous() && t.device() == q.device());
++    TORCH_CHECK(k.scalar_type() == at::ScalarType::Float8_e4m3fn && v.scalar_type() == k.scalar_type() &&
++                k.sizes() == v.sizes() && k.dim() == 3 && k.size(0) % 16 == 0 && k.size(1) == 8 && k.size(2) == 128);
++    TORCH_CHECK(start.scalar_type() == at::kInt && start.numel() == 1 && splits >= 1 &&
++                out.scalar_type() == at::kFloat && lse.scalar_type() == at::kFloat &&
++                out.sizes() == at::IntArrayRef({splits,8,24,128}) && lse.sizes() == at::IntArrayRef({splits,8,24}));
++    fa::PagedXmx<8,false,true> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()),
++        reinterpret_cast<const uint8_t*>(k.data_ptr()), reinterpret_cast<const uint8_t*>(v.data_ptr()),
++        nullptr,nullptr,start.data_ptr<int>(),nullptr,nullptr,out.data_ptr<float>(),lse.data_ptr<float>(),
++        splits,0,0,1024,128,0};
++    queue_of(q).submit([&](sycl::handler& h) {h.parallel_for(sycl::nd_range<1>(splits*24,1),kern);});
++}
++
++void local_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor length,
++               at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor out, at::Tensor lse) {
++    const int M = q.size(0), splits = out.size(0);
++    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf && q.dim() == 3 &&
++                q.size(1) == 24 && q.size(2) == 128 && (M >= 1 && M <= 8));
++    TORCH_CHECK(k.dim() == 3 && k.size(0) >= 1040 && k.size(0) % 16 == 0 &&
++                k.size(1) == 8 && k.size(2) == 128 && k.is_contiguous() && v.is_contiguous() &&
++                k.sizes() == v.sizes() && k.scalar_type() == at::kBFloat16 && v.scalar_type() == k.scalar_type());
++    for (const auto &t: {k,v,pages,length,positions,table,sink,out,lse}) TORCH_CHECK(t.device() == q.device());
++    for (const auto &t: {pages,length,positions,table,sink,out,lse}) TORCH_CHECK(t.is_contiguous());
++    TORCH_CHECK(pages.scalar_type() == at::kInt && pages.dim() == 2 && pages.size(0) == 1 && pages.size(1) == k.size(0) &&
++                length.scalar_type() == at::kInt && length.numel() == 1 && positions.scalar_type() == at::kInt &&
++                positions.numel() == M && table.scalar_type() == at::kFloat && table.dim() == 3 &&
++                table.size(0) == M && table.size(1) == 24 && table.size(2) > 0 &&
++                sink.scalar_type() == at::kFloat && sink.numel() == M*24 && splits > 0 &&
++                out.scalar_type() == at::kFloat && out.numel() == int64_t(splits)*M*24*128 &&
++                lse.scalar_type() == at::kFloat && lse.numel() == int64_t(splits)*M*24);
++    auto& queue = queue_of(q);
++    auto launch = [&]<int Rows>() {
++        fa::PagedXmx<Rows,true> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()),
++            reinterpret_cast<const uint8_t*>(k.data_ptr()), reinterpret_cast<const uint8_t*>(v.data_ptr()),
++            pages.data_ptr<int>(),length.data_ptr<int>(),positions.data_ptr<int>(),table.data_ptr<float>(),
++            sink.data_ptr<float>(),out.data_ptr<float>(),lse.data_ptr<float>(),
++            splits,int(k.size(0)),0,int(k.stride(0)),int(k.stride(1)),int(table.size(2))};
++        const size_t n = splits * 8 * ((Rows*3+7)/8);
++        queue.submit([&](sycl::handler& h) {h.parallel_for(sycl::nd_range<1>(n,1),kern);});
++    };
++    switch (M) {
++        case 1: launch.template operator()<1>(); break;
++        case 2: launch.template operator()<2>(); break;
++        case 3: launch.template operator()<3>(); break;
++        case 4: launch.template operator()<4>(); break;
++        case 5: launch.template operator()<5>(); break;
++        case 6: launch.template operator()<6>(); break;
++        case 7: launch.template operator()<7>(); break;
++        case 8: launch.template operator()<8>(); break;
++    }
++}
++
+ }  // namespace inkling2
+ 
+ TORCH_LIBRARY(inkling2_xpu, m) {
++    m.def("draft_global_xmx(Tensor q, Tensor k, Tensor v, Tensor start, Tensor(a!) out, Tensor(b!) lse) -> ()");
++    m.impl("draft_global_xmx", torch::kXPU, &inkling2::draft_global_xmx);
++    m.def("local_xmx(Tensor q, Tensor k, Tensor v, Tensor ring_positions, Tensor length, Tensor positions, Tensor table, Tensor sink, Tensor(a!) out, Tensor(b!) lse) -> ()");
++    m.impl("local_xmx",torch::kXPU,&inkling2::local_xmx);
++    m.def("packed_kv_store(Tensor(a!) arena, Tensor rows, Tensor key, Tensor value) -> ()");
++    m.impl("packed_kv_store", torch::kXPU, &inkling2::packed_kv_store);
++    m.def("paged_xmx(Tensor q, Tensor k, Tensor v, Tensor pages, Tensor length, Tensor positions, Tensor table, Tensor sink, Tensor(a!) out, Tensor(b!) lse, bool packed=False) -> ()");
++    m.impl("paged_xmx",torch::kXPU,&inkling2::paged_xmx);
++    m.def("dspark_attention(Tensor q, Tensor k, Tensor v, Tensor start, Tensor(a!) out, Tensor(b!) lse, int capacity, int window) -> ()");
++    m.impl("dspark_attention", torch::kXPU, &inkling2::dspark_attention);
+     m.def("moe_gemv(Tensor A, Tensor W, Tensor S, Tensor? alpha, Tensor(a!) out, Tensor sorted, Tensor eob, Tensor? topw, int n_pairs, int a_row_div, int mb) -> ()");
+     m.impl("moe_gemv", torch::kXPU, &inkling2::moe_gemv);
+     m.def("decode_attn(Tensor Q, Tensor K, Tensor V, Tensor slots, Tensor? kvlen, Tensor? r2t, Tensor? rpos, Tensor qpos, Tensor rrel, Tensor proj, Tensor sink, Tensor(a!) oacc, Tensor(b!) om, Tensor(c!) ol, int nq, int ring, int window, float kscale, float vscale) -> ()");
      m.impl("decode_attn", torch::kXPU, &inkling2::decode_attn);
      m.def("moe_gemv2(Tensor A, Tensor W, Tensor S, Tensor? alpha, Tensor(a!) out, Tensor sorted, Tensor eob, Tensor? topw, int n_pairs, int a_row_div, int mb, int variant, int rps, int situ=0, float gcap=4.0, float ucap=25.0, Tensor(b!)? act_out=None) -> ()");
      m.impl("moe_gemv2", torch::kXPU, &inkling2::moe_gemv2);

@@ -1,8 +1,8 @@
 diff --git a/xpu/exl3xpu/inkling2/dense.py b/xpu/exl3xpu/inkling2/dense.py
-index ba5fd30..c0d9b3b 100644
+index ba5fd30..6d13eb6 100644
 --- a/xpu/exl3xpu/inkling2/dense.py
 +++ b/xpu/exl3xpu/inkling2/dense.py
-@@ -2,11 +2,18 @@
+@@ -2,11 +2,27 @@
  small-M decode/verify through the SYCL GEMV (inkling2_xpu.moe_gemv with one 'expert')."""
  from __future__ import annotations
  
@@ -13,6 +13,15 @@ index ba5fd30..c0d9b3b 100644
  from . import moe_triton as _mt
  from .moe_triton import ops
  
++# (verification rows, projection output, projection input) -> (kernel variant, rows/subgroup).
++# Selected with rotating weights on the 32 GB B70. Other geometries keep the upstream setting.
++B70_GEMV = {
++    (1, 1024, 2304): (3, 4), (1, 1056, 2304): (3, 4), (1, 64, 4608): (3, 4),
++    (4, 6552, 2304): (1, 4), (4, 200058, 2304): (0, 4),
++    (8, 1024, 2304): (0, 4), (8, 1056, 2304): (0, 4), (8, 2304, 3072): (0, 4),
++    (8, 64, 4608): (0, 4), (8, 4608, 64): (0, 4), (8, 200058, 2304): (0, 8),
++} if os.environ.get("INKLING2_TUNE_DENSE", "0") == "1" else {}
++
 +W8A8_PREFILL = os.environ.get("INKLING2_PREFILL_W8A8", "0") == "1"
 +W8A8_LIBRARY = os.environ.get("INKLING2_W8A8_LIBRARY")
 +if W8A8_PREFILL and W8A8_LIBRARY:
@@ -21,7 +30,7 @@ index ba5fd30..c0d9b3b 100644
  
  def quant_q8(w: torch.Tensor, group: int = 32):
      """bf16 [N, K] -> int8 [1, N, K], fp16 scales [1, N, K/group] (symmetric, absmax)."""
-@@ -45,6 +52,12 @@ class Q8Linear:
+@@ -45,6 +61,12 @@ class Q8Linear:
              self.q, self.s, self.alpha = quant_fp4(w)
          else:
              self.q, self.s = quant_q8(w)
@@ -34,9 +43,13 @@ index ba5fd30..c0d9b3b 100644
          self._align = {}
  
      def _plan(self, M: int, device):
-@@ -65,4 +78,12 @@ class Q8Linear:
+@@ -63,6 +85,15 @@ class Q8Linear:
+         if M <= self.max_gemv_rows or self.w is None:
+             out = torch.empty(M, self.N, device=x.device, dtype=torch.float32)
              sid, eob, mb = self._plan(M, x.device)
-             ops().moe_gemv2(x.contiguous() if x.dtype == torch.float32 else x.to(torch.bfloat16).contiguous(), self.q, self.s, self.alpha, out, sid, eob, None, M, 1, mb, *_mt.GEMV_DENSE)
+-            ops().moe_gemv2(x.contiguous() if x.dtype == torch.float32 else x.to(torch.bfloat16).contiguous(), self.q, self.s, self.alpha, out, sid, eob, None, M, 1, mb, *_mt.GEMV_DENSE)
++            variant = B70_GEMV.get((mb, self.N, self.K), _mt.GEMV_DENSE) if self.alpha is None else _mt.GEMV_DENSE
++            ops().moe_gemv2(x.contiguous() if x.dtype == torch.float32 else x.to(torch.bfloat16).contiguous(), self.q, self.s, self.alpha, out, sid, eob, None, M, 1, mb, *variant)
              return out
 +        if self.w8a8 is not None and M >= 128:
 +            weights, scales = self.w8a8

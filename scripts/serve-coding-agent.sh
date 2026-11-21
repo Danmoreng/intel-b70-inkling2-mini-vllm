@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "$0")/.."
+mode=${1:-dspark}
+case "$mode" in
+    dspark) export INKLING2_VLLM_DSPARK=1 ;;
+    ordinary) export INKLING2_VLLM_DSPARK=0 ;;
+    *) echo "Usage: $0 [dspark|ordinary] [vLLM arguments...]" >&2; exit 2 ;;
+esac
+if (( $# )); then shift; fi
+export INKLING2_VLLM_BATCH=2048 INKLING2_VLLM_KV_TYPE=fp8_e4m3 INKLING2_ONEDNN_PREFIX_BLOCK=8192
+export INKLING2_EXL3_PREFILL_MIN=256 INKLING2_EXL3_PAIR_MAX=8
+export INKLING2_EXL3_MOE_LIB=/lab/.work/build/inkling2-exl3-moe-mb32.so
+export INKLING2_CONTROL_LIB=/lab/.work/build/inkling2-loop-control.so
+export INKLING2_DECODE_GRAPH=1 INKLING2_FIXED_ROUTER=1 INKLING2_GROUP_CONTROLLERS=1 INKLING2_SYCL_ROUTER=1
+export INKLING2_PAGED_XMX=1 INKLING2_LOCAL_XMX=1 INKLING2_DSPARK_BLOCK=1 INKLING2_DSPARK_GRAPH=1
+export INKLING2_DRAFT_MAX=3 INKLING2_DSPARK_SHORTLIST=256
+export INKLING2_NATIVE_DEPTH_MIX=1 INKLING2_NATIVE_MERGE=1 INKLING2_TUNE_DENSE=1
+export INKLING2_DSPARK_SAMPLING=probabilistic INKLING2_DRAFT_SAMPLE_TOPK=20 INKLING2_DSPARK_VERIFICATION=block
+export INKLING2_KERNEL_CACHE=1 INKLING2_REASONING_BUDGET=1
+export INKLING2_AGENT_TOOLS=1 INKLING2_RING_PREFIX=1
+for lib in "$INKLING2_CONTROL_LIB" "$INKLING2_EXL3_MOE_LIB"; do
+    test -s "${lib#/lab/}" || { echo "Missing build artifact: ${lib#/lab/}" >&2; exit 1; }
+done
+exec bash scripts/serve-vllm-exl3.sh 262144 --kv-cache-memory-bytes 4311744512 "$@"

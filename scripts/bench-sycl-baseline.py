@@ -9,6 +9,7 @@ import random
 import re
 import time
 import urllib.request
+from uuid import uuid4
 
 
 def request(base, endpoint, payload, timeout):
@@ -86,7 +87,7 @@ def record_vllm(base, model, tokens, code, seed, output_tokens, timeout):
     start = time.monotonic()
     response = request(base, "v1/completions", {
         "model": model, "prompt": tokens, "max_tokens": output_tokens, "temperature": 0,
-        "ignore_eos": True, "seed": seed,
+        "ignore_eos": True, "seed": seed, "cache_salt": uuid4().hex,
     }, timeout)
     elapsed = time.monotonic() - start
     for _ in range(20):
@@ -99,6 +100,9 @@ def record_vllm(base, model, tokens, code, seed, output_tokens, timeout):
     prefill_seconds = after[prefill + "_sum"] - before.get(prefill + "_sum", 0)
     decode_seconds = after[decode + "_sum"] - before.get(decode + "_sum", 0)
     prompt_n, predicted_n = (response["usage"][key] for key in ("prompt_tokens", "completion_tokens"))
+    cached = (response["usage"].get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+    if cached:
+        raise RuntimeError(f"Expected a cold prompt, received {cached} cached tokens")
     answer = response["choices"][0]["text"]
     first_number = re.search(r"\d+", answer)
     return {
@@ -106,7 +110,7 @@ def record_vllm(base, model, tokens, code, seed, output_tokens, timeout):
         "output_tokens": predicted_n, "seed": seed, "reuse": False, "code": code,
         "retrieval_pass": bool(first_number and first_number[0] == code),
         "answer_excerpt": answer[:320], "wall_seconds": elapsed, "truncated": prompt_n != len(tokens),
-        "response_model": response["model"],
+        "response_model": response["model"], "cached_tokens": cached,
         "timings": {"prompt_n": prompt_n, "prompt_ms": prefill_seconds * 1000,
                     "prompt_per_second": prompt_n / prefill_seconds,
                     "predicted_n": predicted_n, "predicted_ms": decode_seconds * 1000,

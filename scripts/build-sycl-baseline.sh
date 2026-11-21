@@ -27,6 +27,9 @@ fi
 if [[ ${INKLING2_BUILD_ESIMD_PREFILL:-0} == 1 ]]; then
     patches+=("$PWD/patches/llama-sycl-inkling-esimd-prefill.patch")
 fi
+if [[ ${INKLING2_BUILD_DSPARK_TOP1:-0} == 1 ]]; then
+    patches+=("$PWD/patches/llama-dspark-sycl-top1.patch")
+fi
 deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
 (( $(date +%s) + 38 * 60 < deadline ))
 

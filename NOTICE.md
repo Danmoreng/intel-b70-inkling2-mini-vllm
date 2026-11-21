@@ -8,5 +8,8 @@
   [Qwen B70 recipe](https://github.com/Danmoreng/intel-b70-qwen38-vllm/blob/0356a370da5f73f6b0a4eab613d7103a2356b513/NOTICE.md).
   Its notice records the licenses for components that are built or downloaded
   by that recipe.
+- The integration patches for vLLM 0.33 modify its V2 speculator adapter,
+  text renderer and single-sequence prefix-cache scheduler. vLLM is
+  licensed under Apache 2.0. [vLLM license](licenses/vllm.txt).
 - The checkpoint downloads link to the respective publishers' repositories and
   terms. See [setup](docs/SETUP.md) for pinned revisions.

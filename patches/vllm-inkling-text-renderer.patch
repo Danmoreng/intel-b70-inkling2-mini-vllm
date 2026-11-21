@@ -1,0 +1,21 @@
+--- a/renderers/inkling.py
++++ b/renderers/inkling.py
+@@ -76,7 +76,8 @@
+                     special_ids[token] = token_id
+                     break
+             else:
+-                missing.append(token)
++                if token not in ("<|content_audio_input|>", "<|audio_end|>"):
++                    missing.append(token)
+         if missing:
+             raise ValueError(f"Inkling tokenizer is missing special tokens: {missing}")
+         self._special_ids = special_ids
+@@ -85,6 +86,8 @@
+         return self._tokenizer.encode(text, add_special_tokens=False)
+ 
+     def encode_special(self, token: str) -> int:
++        if token not in self._special_ids:
++            raise ValueError(f"This checkpoint does not provide {token}")
+         return self._special_ids[token]
+ 
+ 

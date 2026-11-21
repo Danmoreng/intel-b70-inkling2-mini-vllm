@@ -1,0 +1,37 @@
+--- a/src/models/dspark.cpp
++++ b/src/models/dspark.cpp
+@@ -1100,8 +1100,6 @@
+         return ggml_cont(ctx0, ggml_view_2d(ctx0, t, t->ne[0], nb, block*t->nb[1], i*t->nb[1]));
+     };
+     auto * context = column(f_rnn, 0);
+-    auto * tie_rank = ggml_arange(ctx0, 0, hparams.n_vocab_unpadded, 1);
+-    tie_rank = ggml_scale_bias(ctx0, tie_rank, -1.0f, hparams.n_vocab_unpadded);
+     auto * prev = ids;
+     for (int64_t i = 1; i < block; ++i) {
+         auto * col = build_inkling2_head(*this, model, *target, prev, state, column(cur, i), column(base, i), context);
+@@ -1109,9 +1107,7 @@
+         logits = ggml_concat(ctx0, logits, col, 1);
+         // Select the first maximum, independent of backend argmax tie order.
+         auto * valid = ggml_cont(ctx0, ggml_view_2d(ctx0, col, hparams.n_vocab_unpadded, nb, col->nb[1], 0));
+-        auto * maximum = ggml_pool_1d(ctx0, valid, GGML_OP_POOL_MAX, valid->ne[0], 1, 0);
+-        auto * is_max = ggml_scale_bias(ctx0, ggml_step(ctx0, ggml_sub(ctx0, ggml_repeat(ctx0, maximum, valid), valid)), -1.0f, 1.0f);
+-        prev = ggml_argmax(ctx0, ggml_mul(ctx0, is_max, tie_rank));
++        prev = ggml_reshape_1d(ctx0, ggml_top_k(ctx0, valid, 1), nb);
+     }
+     const auto block_order = [&](ggml_tensor * t) {
+         t = ggml_reshape_3d(ctx0, t, t->ne[0], nb, block);
+--- a/ggml/src/ggml-sycl/ggml-sycl.cpp
++++ b/ggml/src/ggml-sycl/ggml-sycl.cpp
+@@ -2884,6 +2884,12 @@
+             float val = shared_vals[i * block_size + t];
+ 
+             if (val <= fkth) {
++                if (k == 1 && val == fkth) {
++                    const int idx = shared_idx[i * block_size + t];
++                    if (idx >= 0 && (fi[0] < 0 || idx < fi[0])) {
++                        fi[0] = idx;
++                    }
++                }
+                 // Lane t's list is sorted descending, so once one of its entries loses
+                 // to the k-th best, every later entry loses too. fkth only rises, so
+                 // that stays true for the rest of the merge. This turns the merge from

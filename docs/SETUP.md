@@ -4,7 +4,7 @@
 
 Use a Linux x86-64 host with an Intel Arc Pro B70, a working DRM render node,
 Docker, Bash, GNU coreutils, Git, curl, Python 3 and the Hugging Face `hf`
-CLI. The llama.cpp build also uses `patch` and `tar`. Allow space for Docker
+CLI. Both serving stacks also use `patch` and `tar`. Allow space for Docker
 images, compiler outputs and about 16 GiB per checkpoint. Give the launchers
 exclusive access to the GPU during model tests.
 
@@ -75,7 +75,16 @@ Continue with the [build and serve commands](../README.md#build-and-serve).
 The patch script fetches Trellis Serve at
 `8f8e2fccf0c82c9715b774812f30d9d52f78a5fb`, applies the matching patch and
 compiles the operators into `.work/build/`. The model adapter streams the
-expert checkpoint shards into their final packed GPU arenas.
+expert checkpoint shards into their final packed GPU arenas. DSpark reads
+`mtp.safetensors` from the same EXL3 checkout. The launcher rejects a
+missing drafter before starting vLLM. Build `scripts/build-loop-control.sh`
+for the grouped loop controllers and router used by the coding-agent profile.
+
+The API listens on loopback port 8093. For text with tools, use
+`/v1/chat/completions`, the model name `inkling2-mini-exl3-b70`, and standard
+OpenAI tool definitions. Set the `reasoning_effort` field explicitly when
+comparing coding workflows. Prefix reuse tracks the most recent sequence
+and is scoped to vLLM's block hashes and caller-provided cache salt.
 
 ## llama.cpp and DSpark
 

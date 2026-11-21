@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: MIT
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/intel/esimd.hpp>
+#include <sycl/ext/intel/esimd/xmx/dpas.hpp>
+#include <sycl/ext/intel/experimental/esimd/memory.hpp>
+
+namespace {
+constexpr int lanes = 128;
+
+void check_rows(const at::Tensor &x) {
+    TORCH_CHECK(x.is_xpu() && x.scalar_type() == at::kFloat && x.dim() == 2 && x.is_contiguous() &&
+                x.size(0) >= 1 && x.size(0) <= 8 && x.size(1) == 2304);
+}
+
+at::Tensor control_input(const at::Tensor &cur, const at::Tensor &msg) {
+    check_rows(cur);
+    check_rows(msg);
+    TORCH_CHECK(cur.sizes() == msg.sizes() && cur.device() == msg.device());
+    const int tokens = cur.size(0), width = cur.size(1);
+    auto output = at::empty({tokens, 2 * width}, cur.options());
+    const float *a = cur.data_ptr<float>(), *b = msg.data_ptr<float>();
+    float *out = output.data_ptr<float>();
+    auto &q = c10::xpu::getCurrentXPUStream(cur.device().index()).queue();
+    q.parallel_for(sycl::nd_range<1>(tokens * 2 * lanes, lanes), [=](sycl::nd_item<1> item) {
+        const int group = item.get_group(0), row = group / 2, lane = item.get_local_id(0);
+        const float *x = ((group % 2) ? b : a) + row * width;
+        float sum = 0;
+        for (int i = lane; i < width; i += lanes)
+            sum += x[i] * x[i];
+        const float inv =
+            sycl::rsqrt(sycl::reduce_over_group(item.get_group(), sum, sycl::plus<float>()) / width + 1e-6f);
+        for (int i = lane; i < width; i += lanes)
+            out[group * width + i] = x[i] * inv;
+    });
+    return output;
+}
+
+at::Tensor control_output(const at::Tensor &cur, const at::Tensor &msg, const at::Tensor &gate,
+                          const at::Tensor &norm) {
+    check_rows(cur);
+    check_rows(msg);
+    const int tokens = cur.size(0), width = cur.size(1);
+    TORCH_CHECK(msg.device() == cur.device() && msg.sizes() == cur.sizes() && gate.device() == cur.device() &&
+                gate.scalar_type() == at::kFloat && gate.is_contiguous() && gate.dim() == 2 &&
+                gate.size(0) == tokens && gate.size(1) == 2 * width && norm.device() == cur.device() &&
+                norm.scalar_type() == at::kFloat && norm.is_contiguous() && norm.numel() == width);
+    auto output = at::empty_like(cur);
+    const float *a = cur.data_ptr<float>(), *b = msg.data_ptr<float>();
+    const float *gf = gate.data_ptr<float>(), *scale = norm.data_ptr<float>();
+    float *out = output.data_ptr<float>();
+    auto &q = c10::xpu::getCurrentXPUStream(cur.device().index()).queue();
+    q.parallel_for(sycl::nd_range<1>(tokens * lanes, lanes), [=](sycl::nd_item<1> item) {
+        const int row = item.get_group(0), lane = item.get_local_id(0);
+        float sum = 0, values[2304 / lanes];
+        for (int j = 0; j < 2304 / lanes; ++j) {
+            const int d = lane + j * lanes, g = 2 * row * width + d, i = row * width + d;
+            values[j] = (1.0f - sycl::tanh(gf[g + width])) * a[i] + sycl::tanh(gf[g]) * b[i];
+            sum += values[j] * values[j];
+        }
+        const float inv =
+            sycl::rsqrt(sycl::reduce_over_group(item.get_group(), sum, sycl::plus<float>()) / width + 1e-6f);
+        for (int j = 0; j < 2304 / lanes; ++j) {
+            const int d = lane + j * lanes;
+            out[row * width + d] = values[j] * inv * scale[d];
+        }
+    });
+    return output;
+}
+// Parallelize a small-batch FP32 router projection over experts. Selection
+// uses unbiased sigmoid weights and the checkpoint's bias only for ordering.
+std::vector<at::Tensor> route_small(const at::Tensor &x, const at::Tensor &weights, const at::Tensor &bias,
+                                    double route_scale) {
+    check_rows(x);
+    TORCH_CHECK(weights.device() == x.device() && weights.is_contiguous() &&
+                weights.scalar_type() == at::kFloat && weights.sizes() == at::IntArrayRef({128, 2304}));
+    TORCH_CHECK(bias.device() == x.device() && bias.is_contiguous() && bias.scalar_type() == at::kFloat &&
+                bias.numel() == 128);
+    const int rows = x.size(0);
+    auto scores = at::empty({rows, 128}, x.options());
+    auto ids = at::empty({rows, 8}, x.options().dtype(at::kInt));
+    auto routing = at::empty({rows, 8}, x.options());
+    const auto *a = x.data_ptr<float>(), *w = weights.data_ptr<float>(), *offset = bias.data_ptr<float>();
+    auto *p = scores.data_ptr<float>(), *out = routing.data_ptr<float>();
+    auto *idx = ids.data_ptr<int>();
+    float scale = route_scale;
+    auto &queue = c10::xpu::getCurrentXPUStream(x.device().index()).queue();
+    queue.parallel_for(sycl::nd_range<1>(rows * 128 * 32, 32), [=](sycl::nd_item<1> item) {
+        const int group = item.get_group(0), expert = group % 128, row = group / 128;
+        const int lane = item.get_local_id(0);
+        const auto *av = reinterpret_cast<const sycl::vec<float, 4> *>(a + row * 2304);
+        const auto *wv = reinterpret_cast<const sycl::vec<float, 4> *>(w + expert * 2304);
+        sycl::vec<float, 4> acc(0.f);
+        for (int i = lane; i < 2304 / 4; i += 32)
+            acc += av[i] * wv[i];
+        float sum =
+            sycl::reduce_over_group(item.get_group(), acc[0] + acc[1] + acc[2] + acc[3], sycl::plus<float>());
+        if (lane == 0)
+            p[group] = 1.f / (1.f + sycl::exp(-sum));
+    });
+    queue.parallel_for(sycl::nd_range<1>(rows * 128, 128), [=](sycl::nd_item<1> item) {
+        const int e = item.get_local_id(0), row = item.get_group(0);
+        float value = p[row * 128 + e];
+        float key = value + offset[e], sum = 0;
+        float vals[8];
+        for (int i = 0; i < 8; ++i) {
+            float max_key = sycl::reduce_over_group(item.get_group(), key, sycl::maximum<float>());
+            int winner =
+                sycl::reduce_over_group(item.get_group(), key == max_key ? e : 128, sycl::minimum<int>());
+            vals[i] = sycl::group_broadcast(item.get_group(), value, winner);
+            sum += vals[i];
+            if (e == winner)
+                key = -INFINITY;
+            if (e == 0)
+                idx[row * 8 + i] = winner;
+        }
+        if (e < 8)
+            out[row * 8 + e] = (vals[e] / sum) * scale;
+    });
+    return {ids, routing};
+}
+at::Tensor control_many(const at::Tensor &cur, const at::Tensor &msg, const at::Tensor &norm,
+                        const at::Tensor &down, const at::Tensor &ds, const at::Tensor &up,
+                        const at::Tensor &us, int64_t first, int64_t count) {
+    constexpr int D = 2304, K = 4608, R = 64, WG = 32;
+    TORCH_CHECK((count == 3 && first == 0) || (count == 1 && first == 3));
+    const int M = cur.size(1), C = count, N = cur.size(0), NW = norm.size(0);
+    TORCH_CHECK(M >= 1 && M <= 8 && (N == 1 || N == C) && (NW == 1 || NW == C));
+    for (const auto &t : {cur, msg, norm, down, ds, up, us})
+        TORCH_CHECK(t.is_xpu() && t.device() == cur.device() && t.is_contiguous());
+    TORCH_CHECK(cur.scalar_type() == at::kFloat && cur.dim() == 3 && cur.size(2) == D &&
+                msg.scalar_type() == at::kFloat && msg.sizes() == at::IntArrayRef({4, M, D}) &&
+                norm.scalar_type() == at::kFloat && norm.size(1) == D);
+    TORCH_CHECK(down.scalar_type() == at::kChar && down.sizes() == at::IntArrayRef({4, R, K}) &&
+                ds.scalar_type() == at::kHalf && ds.sizes() == at::IntArrayRef({4, R, K / 32}) &&
+                up.scalar_type() == at::kChar && up.sizes() == at::IntArrayRef({4, 2, R, D}) &&
+                us.scalar_type() == at::kHalf && us.sizes() == at::IntArrayRef({4, 2, 2, D}));
+    auto inputs = at::empty({C, M, K}, cur.options()), hidden = at::empty({C, M, R}, cur.options());
+    auto mixed = at::empty({C, M, D}, cur.options()), output = at::empty_like(mixed);
+    const auto *a = cur.data_ptr<float>(), *b = msg.data_ptr<float>(), *w = norm.data_ptr<float>();
+    const auto *dq = down.data_ptr<int8_t>(), *uq = up.data_ptr<int8_t>();
+    const auto *dsc = reinterpret_cast<const sycl::half *>(ds.data_ptr()),
+               *usc = reinterpret_cast<const sycl::half *>(us.data_ptr());
+    auto *inp = inputs.data_ptr<float>(), *z = hidden.data_ptr<float>(), *mix = mixed.data_ptr<float>(),
+         *out = output.data_ptr<float>();
+    auto &q = c10::xpu::getCurrentXPUStream(cur.device().index()).queue();
+    q.parallel_for(sycl::nd_range<1>(C * M * 2 * lanes, lanes), [=](sycl::nd_item<1> it) {
+        int group = it.get_group(0), lane = it.get_local_id(0), g = group / 2, ch = g / M, row = g % M;
+        auto *src = group % 2 ? b + ((first + ch) * M + row) * D : a + ((N == 1 ? 0 : ch) * M + row) * D;
+        float sum = 0;
+        for (int d = lane; d < D; d += lanes)
+            sum += src[d] * src[d];
+        float inv =
+            sycl::rsqrt(sycl::reduce_over_group(it.get_group(), sum, sycl::plus<float>()) / D + 1e-6f);
+        for (int d = lane; d < D; d += lanes)
+            inp[group * D + d] = src[d] * inv;
+    });
+    q.parallel_for(sycl::nd_range<1>(C * M * R * WG, WG), [=](sycl::nd_item<1> it) {
+        int g = it.get_group(0), lane = it.get_local_id(0), zrow = g / R, wr = (first + zrow / M) * R + g % R;
+        float sum = 0.f;
+        const auto *weights = reinterpret_cast<const sycl::vec<int8_t, 8> *>(dq + wr * K);
+        const auto *act = reinterpret_cast<const sycl::vec<float, 8> *>(inp + zrow * K);
+        for (int d = lane; d < K / 8; d += WG) {
+            sycl::vec<float, 8> prod = weights[d].template convert<float>() * act[d];
+            float t = 0.f;
+            for (int j = 0; j < 8; ++j)
+                t += prod[j];
+            sum += t * float(dsc[wr * (K / 32) + d / 4]);
+        }
+        sum = sycl::reduce_over_group(it.get_group(), sum, sycl::plus<float>());
+        if (lane == 0)
+            z[g] = sum;
+    });
+    q.parallel_for(sycl::nd_range<1>(C * M * D, 128), [=](sycl::nd_item<1> it) {
+        const int i = it.get_global_id(0), dr = i / D, ch = dr / M, row = dr % M, d = i % D,
+                  ctrl = first + ch;
+        float gf[2] = {0.f, 0.f};
+        for (int component = 0; component < 2; ++component) {
+            const int bank = ctrl * 2 + component;
+            for (int half = 0; half < 2; ++half) {
+                float dot = 0;
+#pragma unroll
+                for (int j = 0; j < 32; ++j)
+                    dot += float(uq[(bank * R + half * 32 + j) * D + d]) * z[dr * R + half * 32 + j];
+                gf[component] += dot * float(usc[(bank * 2 + half) * D + d]);
+            }
+        }
+        mix[i] = (1.f - sycl::tanh(gf[1])) * a[((N == 1 ? 0 : ch) * M + row) * D + d] +
+                 sycl::tanh(gf[0]) * b[(ctrl * M + row) * D + d];
+    });
+    q.parallel_for(sycl::nd_range<1>(C * M * lanes, lanes), [=](sycl::nd_item<1> it) {
+        int g = it.get_group(0), lane = it.get_local_id(0), nw = NW == 1 ? 0 : g / M;
+        float sum = 0;
+        for (int d = lane; d < D; d += lanes)
+            sum += mix[g * D + d] * mix[g * D + d];
+        float inv =
+            sycl::rsqrt(sycl::reduce_over_group(it.get_group(), sum, sycl::plus<float>()) / D + 1e-6f);
+        for (int d = lane; d < D; d += lanes)
+            out[g * D + d] = mix[g * D + d] * inv * w[nw * D + d];
+    });
+    return output;
+}
+at::Tensor route_projection(const at::Tensor &x, const at::Tensor &weight) {
+    constexpr int D = 2304, E = 128;
+    TORCH_CHECK(x.is_xpu() && x.scalar_type() == at::kFloat && x.dim() == 2 && x.is_contiguous() &&
+                x.size(1) == D);
+    TORCH_CHECK(weight.device() == x.device() && weight.scalar_type() == at::kHalf &&
+                weight.is_contiguous() && weight.sizes() == at::IntArrayRef({E / 16, D / 16, 8, 16, 2}));
+    const int rows = x.size(0);
+    auto out = at::empty({rows, E}, x.options());
+    const auto *a = x.data_ptr<float>();
+    const auto *w = reinterpret_cast<const sycl::half *>(weight.data_ptr());
+    auto *dest = out.data_ptr<float>();
+    auto &q = c10::xpu::getCurrentXPUStream(x.device().index()).queue();
+    q.parallel_for(sycl::range<1>(((rows + 7) / 8) * (E / 16)), [=](sycl::id<1> id) SYCL_ESIMD_KERNEL {
+        using namespace sycl::ext::intel::esimd;
+        namespace xe = sycl::ext::intel::experimental::esimd;
+        int idx = id[0], et = idx % (E / 16), row0 = (idx / (E / 16)) * 8;
+        simd<float, 128> hi = 0.f, lo = 0.f;
+        for (int t = 0; t < D / 16; ++t) {
+            simd<float, 128> input =
+                xe::lsc_load_2d<float, 16, 8, 1, false, false, xe::cache_hint::cached,
+                                xe::cache_hint::cached>(a, D * 4 - 1, rows - 1, D * 4 - 1, t * 16, row0);
+            simd<sycl::half, 128> ah = convert<sycl::half>(input);
+            simd<sycl::half, 128> al = convert<sycl::half>(input - convert<float>(ah));
+            auto b = block_load<sycl::half, 256>(w + (et * (D / 16) + t) * 256);
+            hi = xmx::dpas<8, 8, float, float, sycl::half, sycl::half>(hi, b, ah);
+            lo = xmx::dpas<8, 8, float, float, sycl::half, sycl::half>(lo, b, al);
+        }
+        hi += lo;
+#pragma unroll
+        for (int r = 0; r < 8; ++r)
+            if (row0 + r < rows)
+                block_store<float, 16>(dest + (row0 + r) * E + et * 16, hi.template select<16, 1>(r * 16));
+    });
+    return out;
+}
+at::Tensor bank_mix(const at::Tensor &states, const at::Tensor &queries) {
+    constexpr int D = 2304, WG = 32;
+    TORCH_CHECK(states.is_xpu() && states.is_contiguous() && states.scalar_type() == at::kFloat &&
+                states.dim() == 3);
+    const int S = states.size(0), M = states.size(1), Q = queries.size(0);
+    TORCH_CHECK(S >= 1 && S <= 16 && M >= 1 && M <= 8 && states.size(2) == D &&
+                queries.device() == states.device() && queries.is_contiguous() &&
+                queries.scalar_type() == at::kFloat && queries.dim() == 2 && queries.size(1) == D);
+    auto logits = at::empty({Q, M, S}, states.options()), out = at::empty({Q, M, D}, states.options());
+    const auto *src = states.data_ptr<float>(), *query = queries.data_ptr<float>();
+    auto *dots = logits.data_ptr<float>();
+    auto &queue = c10::xpu::getCurrentXPUStream(states.device().index()).queue();
+    queue.parallel_for(sycl::nd_range<1>(Q * M * S * WG, WG), [=](sycl::nd_item<1> item) {
+        int g = item.get_group(0), s = g % S, row = (g / S) % M, q = g / (M * S), lane = item.get_local_id(0);
+        auto *a = reinterpret_cast<const sycl::vec<float, 4> *>(src + (s * M + row) * D);
+        auto *b = reinterpret_cast<const sycl::vec<float, 4> *>(query + q * D);
+        sycl::vec<float, 4> v(0.f);
+        for (int i = lane; i < D / 4; i += WG)
+            v += a[i] * b[i];
+        float sum = sycl::reduce_over_group(item.get_group(), v[0] + v[1] + v[2] + v[3], sycl::plus<float>());
+        if (lane == 0)
+            dots[g] = sum;
+    });
+    at::Tensor probabilities = at::softmax(logits, -1);
+    auto *weights = probabilities.data_ptr<float>(), *dest = out.data_ptr<float>();
+    queue.parallel_for(sycl::range<1>(Q * M * D / 4), [=](sycl::id<1> item) {
+        int i = item[0], d = i % (D / 4), g = i / (D / 4), row = g % M;
+        sycl::vec<float, 4> v(0.f);
+        for (int s = 0; s < S; ++s)
+            v += weights[g * S + s] *
+                 reinterpret_cast<const sycl::vec<float, 4> *>(src + (s * M + row) * D)[d];
+        reinterpret_cast<sycl::vec<float, 4> *>(dest)[i] = v;
+    });
+    return out;
+}
+at::Tensor depth_mix(const at::Tensor &bank, const at::Tensor &indices, const at::Tensor &current,
+                     const at::Tensor &queries, const std::optional<at::Tensor> &norm) {
+    constexpr int D = 2304, block = 128, tiles = D / block;
+    int M = current.size(0), count = indices.numel() + 1, Q = queries.size(0);
+    TORCH_CHECK(count >= 1 && count <= 16 && M >= 1 && M <= 8 && Q >= 1 && Q <= 4);
+    for (const auto &t : {bank, indices, current, queries})
+        TORCH_CHECK(t.is_xpu() && t.device() == current.device() && t.is_contiguous());
+    TORCH_CHECK(indices.scalar_type() == at::kInt && current.scalar_type() == at::kFloat &&
+                current.dim() == 2 && current.size(1) == D && bank.scalar_type() == at::kFloat &&
+                bank.dim() == 3 && bank.size(1) == M && bank.size(2) == D &&
+                queries.scalar_type() == at::kFloat && queries.size(1) == D);
+    TORCH_CHECK(!norm || (norm->device() == current.device() && norm->is_contiguous() &&
+                          norm->scalar_type() == at::kFloat && norm->sizes() == at::IntArrayRef({Q, D})));
+    auto stats = at::empty({M, Q + 1, tiles, count}, current.options()),
+         weights = at::empty({Q, M, count}, current.options());
+    auto output = at::empty({Q, M, D}, current.options());
+    const float *buf = bank.data_ptr<float>(), *cur = current.data_ptr<float>(),
+                *qq = queries.data_ptr<float>();
+    const float *scale = norm ? norm->data_ptr<float>() : nullptr;
+    const int *idx = indices.data_ptr<int>();
+    float *partials = stats.data_ptr<float>(), *prob = weights.data_ptr<float>(),
+          *result = output.data_ptr<float>();
+    auto &queue = c10::xpu::getCurrentXPUStream(current.device().index()).queue();
+    queue.parallel_for(sycl::range<1>(M * count * tiles), [=](sycl::id<1> item) SYCL_ESIMD_KERNEL {
+        using namespace sycl::ext::intel::esimd;
+        int i = item[0], tile = i % tiles, s = (i / tiles) % count, m = i / (tiles * count);
+        const float *source = s == count - 1 ? cur : buf + idx[s] * M * D;
+        auto v = block_load<float, block>(source + m * D + tile * block);
+        int base = (m * (Q + 1) * tiles + tile) * count + s;
+        partials[base] = reduce<float>(v * v, std::plus<>());
+        for (int q = 0; q < Q; ++q) {
+            auto w = block_load<float, block>(qq + q * D + tile * block);
+            partials[base + (q + 1) * tiles * count] = reduce<float>(v * w, std::plus<>());
+        }
+    });
+    queue.parallel_for(sycl::nd_range<1>(Q * M * 16, 16),
+                       [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+                           int g = item.get_group(0), m = g % M, q = g / M, s = item.get_local_id(0);
+                           float similarity = 0.f, sum = 0.f;
+                           if (s < count) {
+                               int base = m * (Q + 1) * tiles * count + s;
+                               for (int t = 0; t < tiles; ++t) {
+                                   sum += partials[base + t * count];
+                                   similarity += partials[base + ((q + 1) * tiles + t) * count];
+                               }
+                           }
+                           float inv = sycl::rsqrt(sum / D + 1e-6f);
+                           float logit = s < count ? similarity * inv : -1e30f;
+                           auto sg = item.get_sub_group();
+                           float largest = sycl::reduce_over_group(sg, logit, sycl::maximum<float>());
+                           float p = s < count ? sycl::exp(logit - largest) : 0.f;
+                           float den = sycl::reduce_over_group(sg, p, sycl::plus<float>());
+                           if (s < count)
+                               prob[g * count + s] = p / den * inv;
+                       });
+    queue.parallel_for(sycl::nd_range<1>(Q * M * tiles, tiles), [=](sycl::nd_item<1> item) SYCL_ESIMD_KERNEL {
+        using namespace sycl::ext::intel::esimd;
+        slm_init<32 * sizeof(float)>();
+        int g = item.get_group(0), q = g / M, m = g % M, tile = item.get_local_id(0);
+        simd<float, block> out = 0.f;
+        for (int s = 0; s < count; ++s) {
+            auto src = s == count - 1 ? cur : buf + idx[s] * M * D;
+            auto v = block_load<float, block>(src + m * D + tile * block);
+            out += v * prob[g * count + s];
+        }
+        if (scale) {
+            slm_block_store<float, 1>(tile * 4, simd<float, 1>(reduce<float>(out * out, std::plus<>())));
+            barrier();
+            auto sums = slm_block_load<float, 32>(0);
+            sums.template select<14, 1>(18) = 0.f;
+            float inv = rsqrt(simd<float, 1>(reduce<float>(sums, std::plus<>()) / D + 1e-6f))[0];
+            out *= inv;
+            out *= block_load<float, block>(scale + q * D + tile * block);
+        }
+        block_store<float, block>(result + g * D + tile * block, out);
+    });
+    return output;
+}
+at::Tensor merge_attention(const at::Tensor &partial, const at::Tensor &lse) {
+    constexpr int D = 128, channels = 16, groups = 8, WG = channels * groups;
+    TORCH_CHECK(partial.is_xpu() && partial.is_contiguous() && partial.scalar_type() == at::kFloat &&
+                partial.dim() == 4 && partial.size(3) == D && lse.device() == partial.device() &&
+                lse.is_contiguous() && lse.scalar_type() == at::kFloat &&
+                lse.sizes() == partial.sizes().slice(0, 3));
+    int parts = partial.size(0), rows = partial.size(1) * partial.size(2);
+    TORCH_CHECK(parts > 0 && rows > 0);
+    auto out = at::empty({partial.size(1), partial.size(2), D}, partial.options());
+    const float *src = partial.data_ptr<float>(), *weights = lse.data_ptr<float>();
+    float *dest = out.data_ptr<float>();
+    auto &queue = c10::xpu::getCurrentXPUStream(partial.device().index()).queue();
+    queue.submit([&](sycl::handler &h) {
+        sycl::local_accessor<float, 1> dots(sycl::range<1>(WG), h);
+        sycl::local_accessor<float, 1> masses(sycl::range<1>(groups), h);
+        h.parallel_for(sycl::nd_range<1>(rows * (D / channels) * WG, WG),
+                       [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] {
+                           int wg = it.get_group(0), row = wg / (D / channels),
+                               channel = wg % (D / channels) * channels;
+                           int local = it.get_local_id(0), group = local / channels, lane = local % channels;
+                           float max_lse = -INFINITY;
+                           for (int i = local; i < parts; i += WG)
+                               max_lse = sycl::fmax(max_lse, weights[i * rows + row]);
+                           max_lse = sycl::reduce_over_group(it.get_group(), max_lse, sycl::maximum<float>());
+                           float dot = 0.f, den = 0.f;
+                           for (int i = group; i < parts; i += groups) {
+                               int ix = i * rows + row;
+                               float p = sycl::exp(weights[ix] - max_lse);
+                               dot += src[ix * D + channel + lane] * p;
+                               den += p;
+                           }
+                           dots[local] = dot;
+                           if (lane == 0)
+                               masses[group] = den;
+                           sycl::group_barrier(it.get_group());
+                           if (group == 0) {
+                               float sum = 0.f, mass = 0.f;
+                               for (int i = 0; i < groups; ++i) {
+                                   sum += dots[i * channels + lane];
+                                   mass += masses[i];
+                               }
+                               dest[row * D + channel + lane] = mass > 0 ? sum / mass : 0.f;
+                           }
+                       });
+    });
+    return out;
+}
+} // namespace
+TORCH_LIBRARY_FRAGMENT(inkling2_xpu, m) {
+    m.def("route_projection(Tensor x, Tensor packed_weight) -> Tensor", route_projection);
+    m.def(
+        "depth_mix(Tensor bank, Tensor indices, Tensor current, Tensor queries, Tensor? norm=None) -> Tensor",
+        depth_mix);
+    m.def("merge_attention(Tensor partial, Tensor lse) -> Tensor", merge_attention);
+    m.def("bank_mix(Tensor states, Tensor queries) -> Tensor", bank_mix);
+    m.def("control_many(Tensor current, Tensor messages, Tensor norm, Tensor down, Tensor down_scale, Tensor "
+          "up, Tensor up_scale, int first, int count) -> Tensor",
+          control_many);
+    m.def("route_small(Tensor x, Tensor weights, Tensor bias, float scale) -> Tensor[]", route_small);
+    m.def("control_input(Tensor cur, Tensor msg) -> Tensor", control_input);
+    m.def("control_output(Tensor cur, Tensor msg, Tensor gate, Tensor norm) -> Tensor", control_output);
+}
