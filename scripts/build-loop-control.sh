@@ -26,7 +26,8 @@ timeout --kill-after=10s 5m docker run --rm --name "$name" --network none --cpus
     build loop_control loop-control
     build grouped_qkv qkv
     build attention_prep fused-prep
+    build reasoning_budget reasoning-budget
 '
-for name in loop-control qkv fused-prep; do
+for name in loop-control qkv fused-prep reasoning-budget; do
     mv -- ".work/build/inkling2-$name.so.new" ".work/build/inkling2-$name.so"
 done

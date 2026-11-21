@@ -21,6 +21,7 @@ timeout --kill-after=10s 6m docker run --rm --name "$name" --network none \
     --entrypoint /bin/bash "$runtime" -ec '
     /opt/venv/bin/python /lab/tests/check_grouped_qkv.py
     /opt/venv/bin/python /lab/tests/check_attention_prep.py
+    /opt/venv/bin/python /lab/tests/check_thinking_budget.py /lab/.work/build/inkling2-reasoning-budget.so
     if [[ -f /tmp/code-sample.txt ]]; then
         export INKLING2_LIB=/lab/.work/build/inkling2-vllm.so INKLING2_CONTROL_LIB=/lab/.work/build/inkling2-loop-control.so
         export INKLING2_PREP_LIB=/lab/.work/build/inkling2-fused-prep.so INKLING2_QKV_LIB=/lab/.work/build/inkling2-qkv.so

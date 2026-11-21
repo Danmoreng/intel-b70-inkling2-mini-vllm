@@ -1,0 +1,249 @@
+{
+  "seed": 912101,
+  "routefix_v2_before": {
+    "fixture": "mtp-next-routefix-v2",
+    "seed": 912101,
+    "correct": true,
+    "wall_seconds": 164.1992834039993,
+    "output_tokens": 13703,
+    "thinking_budget": 8192,
+    "turns": [
+      {
+        "completion_tokens": 33,
+        "reasoning_tokens": 7,
+        "tools": [
+          "list_files"
+        ]
+      },
+      {
+        "completion_tokens": 104,
+        "reasoning_tokens": 0,
+        "tools": [
+          "read_file",
+          "read_file",
+          "read_file"
+        ]
+      },
+      {
+        "completion_tokens": 13053,
+        "reasoning_tokens": 11518,
+        "tools": [
+          "write_file"
+        ]
+      },
+      {
+        "completion_tokens": 23,
+        "reasoning_tokens": 0,
+        "tools": [
+          "run_tests"
+        ]
+      },
+      {
+        "completion_tokens": 490,
+        "reasoning_tokens": 140,
+        "tools": []
+      }
+    ]
+  },
+  "routefix_v2_after": {
+    "fixture": "mtp-next-routefix-v2",
+    "seed": 912101,
+    "correct": true,
+    "wall_seconds": 153.2747743889995,
+    "output_tokens": 13186,
+    "thinking_budget": 8192,
+    "turns": [
+      {
+        "completion_tokens": 33,
+        "reasoning_tokens": 7,
+        "thinking_spans": [
+          7
+        ],
+        "tools": [
+          "list_files"
+        ]
+      },
+      {
+        "completion_tokens": 104,
+        "reasoning_tokens": 0,
+        "thinking_spans": [],
+        "tools": [
+          "read_file",
+          "read_file",
+          "read_file"
+        ]
+      },
+      {
+        "completion_tokens": 8232,
+        "reasoning_tokens": 8192,
+        "thinking_spans": [
+          8192
+        ],
+        "tools": [
+          "run_tests"
+        ]
+      },
+      {
+        "completion_tokens": 1803,
+        "reasoning_tokens": 6,
+        "thinking_spans": [
+          6
+        ],
+        "tools": [
+          "write_file"
+        ]
+      },
+      {
+        "completion_tokens": 613,
+        "reasoning_tokens": 587,
+        "thinking_spans": [
+          587
+        ],
+        "tools": [
+          "run_tests"
+        ]
+      },
+      {
+        "completion_tokens": 88,
+        "reasoning_tokens": 39,
+        "thinking_spans": [
+          39
+        ],
+        "tools": [
+          "run_tests"
+        ]
+      },
+      {
+        "completion_tokens": 2313,
+        "reasoning_tokens": 1879,
+        "thinking_spans": [
+          1879
+        ],
+        "tools": []
+      }
+    ]
+  },
+  "api": {
+    "bnew": [
+      {
+        "budget": 8,
+        "seed": 8870,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 8,
+        "seed": 8872,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 8,
+        "seed": 8874,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 32,
+        "seed": 8874,
+        "used": 32,
+        "spans": [
+          32
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 0,
+        "seed": 8870,
+        "used": 0,
+        "spans": [],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 96,
+        "seed": 8871,
+        "used": 96,
+        "spans": [
+          96
+        ],
+        "output": 512,
+        "answer": true
+      }
+    ],
+    "bord": [
+      {
+        "budget": 8,
+        "seed": 8870,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 8,
+        "seed": 8872,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 8,
+        "seed": 8874,
+        "used": 8,
+        "spans": [
+          8
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 32,
+        "seed": 8874,
+        "used": 32,
+        "spans": [
+          32
+        ],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 0,
+        "seed": 8870,
+        "used": 0,
+        "spans": [],
+        "output": 512,
+        "answer": true
+      },
+      {
+        "budget": 96,
+        "seed": 8871,
+        "used": 96,
+        "spans": [
+          96
+        ],
+        "output": 512,
+        "answer": true
+      }
+    ]
+  },
+  "synthetic": "Passed cumulative 8192, zero budget, proposal rollback, slot reuse and prompt-tail checks."
+}

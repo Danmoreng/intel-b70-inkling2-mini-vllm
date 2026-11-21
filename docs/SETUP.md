@@ -89,7 +89,12 @@ Decode groups Q, K and V into one Intel XMX projection. It splits each activatio
 The API listens on loopback port 8093. For text with tools, use
 `/v1/chat/completions`, the model name `inkling2-mini-exl3-b70`, and standard
 OpenAI tool definitions. Set the `reasoning_effort` field explicitly when
-comparing coding workflows. Prefix reuse tracks the most recent sequence
+comparing coding workflows. For the measured coding-agent profile, send
+`"reasoning_effort": "medium"`, `"thinking_token_budget": 8192` and
+`"max_tokens": 16384` in each chat request. The single-sequence Intel sampler
+shares the requested thinking budget across all thinking messages in that
+response, including tokens accepted from DSpark. The next API request gets
+its own budget. Prefix reuse tracks the most recent sequence
 and is scoped to vLLM's block hashes and caller-provided cache salt.
 
 ## llama.cpp and DSpark

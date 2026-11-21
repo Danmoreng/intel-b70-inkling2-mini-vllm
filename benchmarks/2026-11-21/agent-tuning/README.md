@@ -22,3 +22,9 @@ python3 scripts/bench-frozen-serving.py --archive "$QWEN_SERVING_ARCHIVE" \
   --cases phase-4k-c1-r1 phase-4k-c1-r2 phase-4k-c1-r3 \
   --effort medium --thinking-budget 8192 --output ordinary-review.jsonl
 ```
+
+## Thinking budget across tool calls
+
+Inkling can produce multiple thinking messages before returning a tool call or a final answer. The original vLLM V2 sampler counted from the most recent thinking opener. On the held-out routing task with seed 912101, one API response reported 11,518 reasoning tokens against a requested budget of 8,192. The B70 sampler now carries the cumulative count through every thinking message in a response. It counts accepted history and only the draft prefix for the row under verification.
+
+On the same fixture and seed, the corrected server reached exactly 8,192 thinking tokens in its longest response and passed the hidden suite. Total task time was 153.27 s versus 164.20 s in the original run. Both ordinary and DSpark also returned exactly the requested reasoning counts in six short API checks at budgets 0, 8, 32 and 96. The tool-call sequence changed in the routing task. This pair measures the behavior of the cap and illustrates the variability of full-task timings. A native regression test checks multiple thinking spans, a rejected draft prefix, prompt resumption, the end-of-sampling token, a recycled slot and an 8,192-token boundary. [API counts and tool turns](thinking-budget.json)

@@ -110,6 +110,15 @@ if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
     spec_args+=(--tokenizer-mode inkling --enable-auto-tool-choice --tool-call-parser inkling --reasoning-parser inkling
                 --enable-prompt-tokens-details)
     if [[ ${INKLING2_REASONING_BUDGET:-0} == 1 ]]; then
+        budget_library=/lab/.work/build/inkling2-reasoning-budget.so
+        test -s "${budget_library#/lab/}" || { echo 'Build the coding kernels with scripts/build-loop-control.sh.' >&2; exit 1; }
+        budget_files=(v1/worker/gpu/sample/{sampler,thinking_budget}.py)
+        docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${budget_files[@]}" | tar -xf - -C "$work/text-renderer"
+        patch --silent --batch --forward --fuzz=0 -d "$work/text-renderer" -p1 < patches/vllm-inkling-cumulative-thinking.patch
+        for file in "${budget_files[@]}"; do
+            spec_mounts+=(--mount "type=bind,source=$work/text-renderer/$file,target=$base/$file,readonly")
+        done
+        spec_mounts+=(--env "INKLING2_BUDGET_LIB=$budget_library")
         spec_args+=(--reasoning-config '{"reasoning_start_str":"<|content_thinking|>","reasoning_end_str":"<|end_message|>"}')
     fi
 fi
