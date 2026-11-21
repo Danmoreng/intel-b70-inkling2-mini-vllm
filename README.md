@@ -21,11 +21,17 @@ prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 
 ## Coding and decode measurements
 
-In a single-agent replay of three short source reviews (about 5,000 Inkling prompt tokens and 1,024 generated tokens each), the B70 delivered **62.9 output tokens/s** at the streaming client using probabilistic DSpark proposals and block verification. The published full-context checkout repeated these three reviews at **63.7 tok/s**. The archived Qwen median for the same source text was 60.6. An earlier greedy DSpark profile reached 53.1 tok/s on these reviews. In a separate warm, greedy-output 4K kernel screen, native depth mixing and grouped controllers reached **59.9 tok/s ordinary** and **96.3–101.7 tok/s with DSpark**.
+The current full-context DSpark launcher delivered **82.6, 64.9 and 56.7 client output tokens/s** on the three frozen source-review lengths (about 5K, 77K and 155K Inkling input tokens). Each value is a median of three seeded 1,024-token continuations. The archived Qwen medians were 60.6, 53.3 and 44.6. The native 4K logbook timing was **106.7–114.8 decode tok/s**. At 196,608 input tokens the native rates were **1,381 prefill / 57.3 decode**. At 262,016 input plus 128 output tokens they were **1,285 / 40.6**. Both initial long prompts retrieved the code. A 196,608-token cache hit answered the follow-up correctly and took 0.88 s to first output. A cold control on that follow-up repeated the question and missed the code.
+
+DSpark completed the four original coding fixtures/seeds in **113.7 seconds** with requested effort `none` and **194.2 seconds** with `medium`. All four passed in both settings. Archived Qwen passed all four in **145.9 seconds** at medium effort. The held-out routing and streaming-codec tasks passed once in four runs on Inkling with effort `none`. [Results, settings and raw data](benchmarks/2026-11-21/agent-decode/README.md)
+
+### Previous public checkpoint
+
+In a single-agent replay of three short source reviews (about 5,000 Inkling prompt tokens and 1,024 generated tokens each), the B70 delivered **62.9 output tokens/s** at the streaming client using probabilistic DSpark proposals and block verification. The first public DSpark checkout repeated these three reviews at **63.7 tok/s**. The archived Qwen median for the same source text was 60.6. An earlier greedy DSpark profile reached 53.1 tok/s on these reviews. In a separate warm, greedy-output 4K kernel screen, native depth mixing and grouped controllers reached **59.9 tok/s ordinary** and **96.3–101.7 tok/s with DSpark**.
 
 The earlier long-context profile measured **1,389 prefill / 45.1 decode tok/s** with DSpark at 196,608 input tokens and **1,288 / 37.7** at 262,016. Ordinary decode was **38.4** and **31.1 tok/s**, respectively. All four prompts retrieved the inserted code. The coding fixtures also check task completion with hidden tests. [Measurements, settings and reproduction](benchmarks/2026-11-21/agent-decode/README.md)
 
-The full-context checkout with tool support and prefix reuse reached **57.7–57.9 tok/s ordinary** and **93.5–99.0 tok/s with DSpark** on the two warm 4K kernel-screen prompts. [Full-profile verification and cache results](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
+That earlier full-context checkout with tool support and prefix reuse reached **57.7–57.9 tok/s ordinary** and **93.5–99.0 tok/s with DSpark** on the two warm 4K kernel-screen prompts. [Full-profile verification and cache results](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
 
 ## Original prefill measurements
 

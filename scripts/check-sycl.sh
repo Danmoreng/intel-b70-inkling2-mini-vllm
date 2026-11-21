@@ -77,7 +77,9 @@ if [[ "$mode" == exl3 ]]; then
             --env "EXL3_MOE_OUT=$build_lib.new" --env "EXL3_MOE_FLAGS=-DEXL3_INKLING2 -DEXL3_MOE_PREFILL_MB=$tile_rows" \
             --entrypoint /bin/bash "$builder" /opt/trellis-serve/xpu/scripts/build_moe.sh \
             >"$output/exl3-compile.log" 2>&1
-        mv -- "$output/${build_lib##*/}.new" "$output/${build_lib##*/}"
+        if [[ -z ${INKLING2_EXL3_TEST_LIB:-} ]]; then
+            library="/lab/.work/build/$lib_name.new"
+        fi
     fi
     if [[ ${INKLING2_EXL3_TEST:-1} == 1 ]]; then
         timeout --kill-after=10s 3m docker run --rm --name "$check_name" --network none \
@@ -87,6 +89,9 @@ if [[ "$mode" == exl3 ]]; then
             --env PYTHONDONTWRITEBYTECODE=1 --env "EXL3_MOE_LIB=$library" --env SYCL_CACHE_PERSISTENT=0 \
             --entrypoint /opt/venv/bin/python "$runtime" /lab/tests/check_exl3_inkling.py /lab/models/exl3 "${@:2}" \
             | tee "$output/exl3-parity.log"
+    fi
+    if [[ ${INKLING2_EXL3_BUILD:-1} == 1 ]]; then
+        mv -- "$output/$lib_name.new" "$output/$lib_name"
     fi
     exit
 fi

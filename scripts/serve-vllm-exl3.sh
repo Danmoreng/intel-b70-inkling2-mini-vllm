@@ -144,6 +144,9 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
     --env "INKLING2_NATIVE_DEPTH_MIX=${INKLING2_NATIVE_DEPTH_MIX:-0}" \
+    --env "INKLING2_QKV_LIB=${INKLING2_QKV_LIB:-}" \
+    --env "INKLING2_QKV_SPLITS=${INKLING2_QKV_SPLITS:-2}" \
+    --env "INKLING2_PREP_LIB=${INKLING2_PREP_LIB:-}" \
     --env "INKLING2_NATIVE_MERGE=${INKLING2_NATIVE_MERGE:-0}" \
     --env "INKLING2_TUNE_DENSE=${INKLING2_TUNE_DENSE:-0}" \
     --env "INKLING2_FIXED_ROUTER=${INKLING2_FIXED_ROUTER:-0}" \
@@ -162,6 +165,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_DRAFT_Q8_HEAD=${INKLING2_DRAFT_Q8_HEAD:-0}" \
     --env "INKLING2_DSPARK_SHORTLIST=${INKLING2_DSPARK_SHORTLIST:-0}" \
     --env "INKLING2_COMPARE_GRAPH=${INKLING2_COMPARE_GRAPH:-0}" \
+    --env "INKLING2_EXL3_SMALL_DPAS=${INKLING2_EXL3_SMALL_DPAS:-0}" \
     --env "INKLING2_EXL3_PAIR_MAX=${INKLING2_EXL3_PAIR_MAX:-8}" \
     --env "INKLING2_RING_PREFIX=${INKLING2_RING_PREFIX:-0}" \
     --env "INKLING2_CONTROL_LIB=${INKLING2_CONTROL_LIB:-}" \

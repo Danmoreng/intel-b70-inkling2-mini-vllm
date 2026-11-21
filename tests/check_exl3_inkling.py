@@ -28,6 +28,7 @@ def main():
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--layer", type=int, default=0)
     parser.add_argument("--tokens", type=int, nargs="+", default=(1, 4, 8))
+    parser.add_argument("--small-dpas", action="store_true", help="Use the eight-row XMX expert path for 4–8 rows")
     args = parser.parse_args()
 
     torch.set_num_threads(4)
@@ -41,6 +42,8 @@ def main():
 
     arena = torch.stack(packed).to("xpu")
     expert_ptrs = torch.arange(len(packed), device="xpu", dtype=torch.int64) * arena.stride(0) + arena.data_ptr()
+    if args.small_dpas:
+        ops().moe_set_tiny_dpas(4, 9, 18)
     kernel = ops().moe_forward
     generator = torch.Generator().manual_seed(23800 + layer)
     for dtype in (torch.float16, torch.bfloat16):

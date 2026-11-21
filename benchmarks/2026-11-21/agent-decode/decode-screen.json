@@ -1,0 +1,49 @@
+{
+  "accepted_spec_width": 3,
+  "reference_sampling": {
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 20,
+    "generated": 1024
+  },
+  "expert_kernel_trials": {
+    "selected": "dpas-shared",
+    "client_tps": {
+      "esimd": {
+        "phase-4k-c1-r1": 69.76308821651804,
+        "phase-4k-c1-r2": 66.66342435233497,
+        "phase-4k-c1-r3": 72.07546918133886
+      },
+      "dpas": {
+        "phase-4k-c1-r1": 71.55358100527624,
+        "phase-4k-c1-r2": 74.480249858333,
+        "phase-4k-c1-r3": 76.78681380552224
+      },
+      "dpas-shared": {
+        "phase-4k-c1-r1": 74.38507384780557,
+        "phase-4k-c1-r2": 83.33554423021384,
+        "phase-4k-c1-r3": 85.6863133724208
+      },
+      "sparse": {
+        "phase-4k-c1-r1": 69.74047105671063,
+        "phase-4k-c1-r2": 66.43603406318095,
+        "phase-4k-c1-r3": 72.11658968677035
+      }
+    },
+    "grouped_change": 1.0653668256023396,
+    "sparse_change": 0.999675800478654
+  },
+  "ordinary_target_graph_ms": 16.469,
+  "verify4_target_graph_ms": 40.254,
+  "average_distinct_experts": {
+    "2_rows": 12.88,
+    "4_rows": 20.04,
+    "8_rows": 30.37
+  },
+  "sparse_gumbel_us_per_three": {
+    "standard": 44.2,
+    "sparse": 9.9
+  },
+  "matched_gumbel_draws": 360,
+  "finite_fp8_patterns_bit_exact": 254
+}

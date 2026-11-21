@@ -53,6 +53,96 @@
       "decode_tps": 59.8712392722389
     }
   ],
+  "ordinary-qkv": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1896.6474957028026,
+      "decode_tps": 60.31858748577387
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1893.804635072397,
+      "decode_tps": 60.21785847280032
+    }
+  ],
+  "ordinary-depthscores": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1900.5508253790154,
+      "decode_tps": 59.86128230049906
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1901.410701998319,
+      "decode_tps": 59.80062140390433
+    }
+  ],
+  "ordinary-fusedprep": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1901.33793237263,
+      "decode_tps": 61.508370615308806
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1896.5537367829245,
+      "decode_tps": 61.46167862110446
+    }
+  ],
+  "ordinary-group-prep": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1899.813349506724,
+      "decode_tps": 59.460025409055916
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1895.5641776332266,
+      "decode_tps": 59.39844948045928
+    }
+  ],
+  "spec3-group-prep": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1870.1912012440441,
+      "decode_tps": 104.4888779016782
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1864.8671667365122,
+      "decode_tps": 98.98317005527807
+    }
+  ],
   "spec3-qualified": [
     {
       "prompt": 4096,
@@ -87,6 +177,132 @@
       "retrieved": true,
       "prefill_tps": 1837.5953935875486,
       "decode_tps": 96.3415976045036
+    }
+  ],
+  "spec3-tinymoe": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1855.3185749694971,
+      "decode_tps": 102.79733308826523
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1845.2162096288662,
+      "decode_tps": 97.94744413330582
+    }
+  ],
+  "spec3-qkv": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1856.9311576639411,
+      "decode_tps": 105.81827027895767
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1838.5857991236887,
+      "decode_tps": 100.69967058842212
+    }
+  ],
+  "spec3-fusedprep": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1848.7081528241356,
+      "decode_tps": 105.95003897872112
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1835.9593379644843,
+      "decode_tps": 97.69390153064681
+    }
+  ],
+  "spec3-depthscores": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1843.6289536451418,
+      "decode_tps": 101.44625130797162
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1833.2093557612418,
+      "decode_tps": 96.24778619402383
+    }
+  ],
+  "spec3-combo-old": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1844.3133843264002,
+      "decode_tps": 109.44440901646416
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1833.616256980211,
+      "decode_tps": 101.58705870269445
+    }
+  ],
+  "spec3-combo-xmx": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1850.5516122741008,
+      "decode_tps": 111.00925036339825
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1839.0068937138287,
+      "decode_tps": 106.07820815880804
+    }
+  ],
+  "spec3-ranked32768": [
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 37,
+      "retrieved": true,
+      "prefill_tps": 1851.5532162340066,
+      "decode_tps": 84.88048615673354
+    },
+    {
+      "prompt": 4096,
+      "output": 128,
+      "seed": 38,
+      "retrieved": true,
+      "prefill_tps": 1842.8656264993942,
+      "decode_tps": 82.9237572798666
     }
   ],
   "spec3-q8head0": [

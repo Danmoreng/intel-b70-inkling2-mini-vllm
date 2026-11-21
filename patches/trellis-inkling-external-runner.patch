@@ -1,5 +1,5 @@
 diff --git a/xpu/exl3xpu/inkling2/sgl_model.py b/xpu/exl3xpu/inkling2/sgl_model.py
-index 9eb7429..134721c 100644
+index 9eb7429..2f5921b 100644
 --- a/xpu/exl3xpu/inkling2/sgl_model.py
 +++ b/xpu/exl3xpu/inkling2/sgl_model.py
 @@ -38,7 +38,7 @@ _FUSED_CONV = os.environ.get("INKLING2_FUSED_CONV", "1") == "1"
@@ -87,7 +87,25 @@ index 9eb7429..134721c 100644
          del raw
          if self.visual is not None:
              self.visual.to(dev)
-@@ -204,6 +209,30 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -192,6 +197,17 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 for mod in ("attn", "k", "v", "mlp"):
+                     c = f"layers.{il}.controllers.{mod}."
+                     self.fused[(il, "gf" + mod)] = cat_q8([c + "gain_weight", c + "forget_weight"])
++        self.native_prep = os.environ.get("INKLING2_PREP_LIB")
++        if self.native_prep:
++            torch.ops.load_library(self.native_prep)
++        self.grouped_qkv = None
++        if qkv_lib := os.environ.get("INKLING2_QKV_LIB"):
++            from inkling_xpu.grouped_dense import GroupedQKV
++            torch.ops.load_library(qkv_lib)
++            splits = int(os.environ.get("INKLING2_QKV_SPLITS", "2"))
++            self.grouped_qkv = {
++                layer: GroupedQKV([self.fused[layer, kind][0] for kind in ("qrgs", "k", "v")], splits)
++                for layer in range(self.n_layers)}
+         self.f32 = {}
+         for k in list(self.w):
+             if k.endswith(("sconv.weight", "_sconv.weight")) or k.endswith(".attn_sconv.weight") or k.endswith(".mlp_sconv.weight"):
+@@ -204,6 +220,30 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              if k.startswith("attn_res.") or k.startswith("middle_cycle_cross_pass"):
                  self.w[k] = self.w[k].float() * sc
          self.n_block_slots = 12
@@ -118,7 +136,7 @@ index 9eb7429..134721c 100644
          self._idx_cache = {}
          self._qkv_norm = {il: torch.stack([self.w[f"layers.{il}.{n}_input_norm.weight"].float() for n in "qkv"]).contiguous()
                            for il in range(self.n_layers) if il not in self.local}
-@@ -328,6 +357,27 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -328,6 +368,27 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          o = torch.cat(out)
          return (x.float() + o) / math.sqrt((2 if dynamic is not None else 1) * N_CONV + 1)
  
@@ -146,12 +164,65 @@ index 9eb7429..134721c 100644
      def _attention(self, il, vi, inq, ink, inv, pos, reqs, fb, glob):
          p = f"layers.{il}.attn."
          T = inq.shape[0]
-@@ -357,15 +407,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -336,40 +397,55 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         lq, sq = self.fused[(il, "qrgs")]
+         lk, sk_ = self.fused[(il, "k")]
+         lv, sv_ = self.fused[(il, "v")]
+-        kk, vv = lk(ink), lv(inv)
+-        kdyn = vdyn = None
+-        if not is_local:
+-            kk, kdyn = kk.split(sk_, -1)
+-            vv, vdyn = vv.split(sv_, -1)
+-        k = self._conv(vi, "k", kk, self.f32[p + "k_sconv.weight"], kdyn, reqs, pos)
+-        v = self._conv(vi, "v", vv, self.f32[p + "v_sconv.weight"], vdyn, reqs, pos)
++        qrgs = None
++        if self._static and self.grouped_qkv is not None:
++            qrgs, kk, vv = self.grouped_qkv[il](inq, ink, inv)
++        else:
++            kk, vv = lk(ink), lv(inv)
++        native_prep = self._static and self.native_prep and _FUSED_PREP
++        if not native_prep:
++            kdyn = vdyn = None
++            if not is_local:
++                kk, kdyn = kk.split(sk_, -1)
++                vv, vdyn = vv.split(sv_, -1)
++            k = self._conv(vi, "k", kk, self.f32[p + "k_sconv.weight"], kdyn, reqs, pos)
++            v = self._conv(vi, "v", vv, self.f32[p + "v_sconv.weight"], vdyn, reqs, pos)
+         if self._static and _FUSED_PREP:
+-            qrgs = lq(inq)
+-            q, r, gate_s, sink, kb16, vb16 = attn_prep(
+-                qrgs, k, v, pos, self.f32[p + "q_l2_clip.scale"], self.f32[p + "rel_l2_clip.scale"],
+-                H=self.H, HKV=self.Hkv, D=self.hd, DR=self.d_rel, qk_thr=tc["qk_l2_clip_threshold"],
+-                rel_thr=tc["rel_l2_clip_threshold"],
+-                tau_alpha=None if is_local else tc["log_scaling_alpha"], tau_floor=None if is_local else float(tc["log_scaling_n_floor"]))
++            if qrgs is None:
++                qrgs = lq(inq)
++            if native_prep:
++                si = self.visit_slot[vi]
++                q, r, gate_s, sink, kb16, vb16 = torch.ops.inkling_prep.forward(
++                    qrgs, kk, vv, pos, self.f32[p + "q_l2_clip.scale"], self.f32[p + "rel_l2_clip.scale"],
++                    self.f32[p + "k_sconv.weight"], self.f32[p + "v_sconv.weight"], self.conv[vi], self.conv_pos,
++                    self.swa_k[si] if is_local else None, self.swa_v[si] if is_local else None,
++                    tc["qk_l2_clip_threshold"], tc["rel_l2_clip_threshold"], tc["log_scaling_alpha"],
++                    float(tc["log_scaling_n_floor"]))
++            else:
++                q, r, gate_s, sink, kb16, vb16 = attn_prep(
++                    qrgs, k, v, pos, self.f32[p + "q_l2_clip.scale"], self.f32[p + "rel_l2_clip.scale"],
++                    H=self.H, HKV=self.Hkv, D=self.hd, DR=self.d_rel, qk_thr=tc["qk_l2_clip_threshold"],
++                    rel_thr=tc["rel_l2_clip_threshold"],
++                    tau_alpha=None if is_local else tc["log_scaling_alpha"], tau_floor=None if is_local else float(tc["log_scaling_n_floor"]))
+             proj = self.f32[p + "rel_logits_proj.proj"]
+             sl = self._st_slot
+             if is_local:
+                 si = self.visit_slot[vi]
                  kb, vb = self.swa_k[si], self.swa_v[si]
-                 rows = sl * RING + pos.remainder(RING)
-                 kb[rows] = kb16; vb[rows] = vb16
+-                rows = sl * RING + pos.remainder(RING)
+-                kb[rows] = kb16; vb[rows] = vb16
 -                o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
 -                                     ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
++                if not native_prep:
++                    rows = sl * RING + pos.remainder(RING)
++                    kb[rows] = kb16; vb[rows] = vb16
 +                if getattr(self, "local_xmx", None):
 +                    o = self.local_xmx(q, kb, vb, self.swa_pos, fb.seq_lens, pos, r, proj, sink)
 +                else:
@@ -168,7 +239,12 @@ index 9eb7429..134721c 100644
              o = o.reshape(T, self.H * self.hd) * gate_s
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
-@@ -389,15 +437,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+-        q, r, gate, sink = lq(inq).split(sq, -1)
++        q, r, gate, sink = (lq(inq) if qrgs is None else qrgs).split(sq, -1)
+         q = q.reshape(T, self.H, self.hd)
+         r = r.reshape(T, self.H, self.d_rel)
+         q = _l2_clip(q, self.f32[p + "q_l2_clip.scale"], tc["qk_l2_clip_threshold"])
+@@ -389,15 +465,13 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  kb, vb = self.swa_k[si], self.swa_v[si]
                  rows = sl * RING + pos.remainder(RING)
                  kb[rows] = k.to(torch.bfloat16); vb[rows] = v.to(torch.bfloat16)
@@ -190,7 +266,7 @@ index 9eb7429..134721c 100644
              o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
              o = self.L(p + "wo_ud.weight", o)
              return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
-@@ -417,16 +463,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -417,16 +491,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              kb[self._ring_rows] = k[self._ring_src].to(torch.bfloat16)
              vb[self._ring_rows] = v[self._ring_src].to(torch.bfloat16)
          else:
@@ -208,7 +284,7 @@ index 9eb7429..134721c 100644
          o = torch.cat(outs) if len(outs) > 1 else outs[0]
          o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
          o = self.L(p + "wo_ud.weight", o)
-@@ -440,17 +477,29 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -440,17 +505,29 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          gain, forget = torch.tanh(lgf(h)).split(sgf, -1)
          return (1 - forget) * cur + gain * msg
  
@@ -241,7 +317,7 @@ index 9eb7429..134721c 100644
          dev = pos.device
          # new requests: invalidate their rings
          for (s, r0, n, p0) in reqs:
-@@ -458,11 +507,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -458,11 +535,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  self.swa_pos[s].fill_(-1)
                  self.conv_pos[s].fill_(-1)
          # global: paged keys 0 .. p0+n-1 of each request
@@ -259,7 +335,7 @@ index 9eb7429..134721c 100644
          locs, starts, kp = [], [0], []
          if True:
              self._g_loc = self._g_kpos = self._g_start = None
-@@ -582,7 +632,8 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -582,7 +660,8 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              self._idx_cache[key] = t
          return t
  
@@ -269,7 +345,7 @@ index 9eb7429..134721c 100644
          pos = positions.long()
          T = input_ids.shape[0]
          extend_scratch = None if self._static else self._swa_scratch
-@@ -594,7 +645,9 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -594,7 +673,9 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
          bbuf = torch.empty(self.n_block_slots, T, self.D, device=cur.device, dtype=torch.float32)
          nslot = 0
          blocks: list[int] = []
@@ -280,7 +356,7 @@ index 9eb7429..134721c 100644
          qloop, kvloop = self.w["middle_cycle_cross_pass_queries"], self.w["middle_cycle_cross_pass_kv_queries"]
          for vi, (il, pss) in enumerate(self.visits):
              is_local = il in self.local
-@@ -606,27 +659,42 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -606,27 +687,42 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                      else:
                          bank, bank_last = blocks[len(prelude[0]) + 1:], cur
                          blocks, cur = list(prelude[0]), prelude[1]
@@ -331,7 +407,7 @@ index 9eb7429..134721c 100644
              if _DEBUG:
                  torch.xpu.synchronize(); logger.info("inkling2 visit %d layer %d pre-attn ok", vi, il)
              att = self._attention(il, vi, *inputs, pos, reqs, fb, None)
-@@ -641,10 +709,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -641,10 +737,14 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
              mq = self.w[f"attn_res.mlp_queries.{il}"].view(1, -1)
              mn = self.w[a + "mlp_norm.weight"].float().view(1, -1)
              if msgs is None:
@@ -349,7 +425,7 @@ index 9eb7429..134721c 100644
              y = self._conv(vi, "mlp_out", self._moe(il, x), self.f32[a + "mlp_sconv.weight"], None, reqs, pos)
              cur = ffn_inp + y
          if not self._static:
-@@ -655,9 +727,11 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+@@ -655,9 +755,11 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
                  m = min(n, RING)
                  pp = torch.arange(p0 + n - m, p0 + n, device=pos.device)
                  self.swa_pos[s, pp.remainder(RING)] = pp.int()

@@ -1,0 +1,109 @@
+// Fused batch-one short convolutions, normalized attention inputs, and local cache writes.
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <cmath>
+
+namespace {
+using bf16 = sycl::ext::oneapi::bfloat16;
+std::vector<at::Tensor> prepare(at::Tensor qrgs, at::Tensor k, at::Tensor v, at::Tensor pos, at::Tensor qs,
+                                at::Tensor rs, at::Tensor kw, at::Tensor vw, at::Tensor conv, at::Tensor rp,
+                                std::optional<at::Tensor> local_k, std::optional<at::Tensor> local_v,
+                                double qlimit, double rlimit, double alpha, double floor) {
+    constexpr int H = 24, HK = 8, D = 128, DR = 16, KC = HK * D, QC = H * D, RC = H * DR;
+    const int m = k.size(0), ring = conv.size(1), channels = conv.size(2);
+    const bool local = bool(local_k), dyn = k.size(1) > KC;
+    TORCH_CHECK(qrgs.is_xpu() && m >= 1 && m <= 8 && qrgs.sizes() == at::IntArrayRef({m, 2 * QC + RC + H}) &&
+                k.dim() == 2 && v.sizes() == k.sizes() && k.size(1) == (dyn ? KC + HK * 4 : KC) &&
+                floor > 0.);
+    for (const auto &t : {qrgs, k, v, qs, rs, kw, vw, conv})
+        TORCH_CHECK(t.device() == qrgs.device() && t.scalar_type() == at::kFloat && t.stride(-1) == 1);
+    for (const auto &t : {pos, rp})
+        TORCH_CHECK(t.device() == qrgs.device() && t.scalar_type() == at::kLong && t.is_contiguous());
+    TORCH_CHECK(pos.numel() == m && qs.is_contiguous() && qs.numel() == QC && rs.is_contiguous() &&
+                rs.numel() == RC && kw.is_contiguous() && vw.is_contiguous() && kw.numel() == KC * 4 &&
+                vw.numel() == KC * 4 && conv.is_contiguous() && conv.dim() == 3 && conv.size(0) == 1 &&
+                channels >= 2 * KC && ring >= m + 3 && rp.numel() == ring);
+    TORCH_CHECK(local == bool(local_v));
+    int slots = 0;
+    if (local) {
+        TORCH_CHECK(!dyn);
+        for (const auto &t : {*local_k, *local_v})
+            TORCH_CHECK(t.device() == k.device() && t.scalar_type() == at::kBFloat16 && t.is_contiguous() &&
+                        t.dim() == 3 && t.size(1) == HK && t.size(2) == D && t.size(0) >= m);
+        TORCH_CHECK(local_k->sizes() == local_v->sizes());
+        slots = local_k->size(0);
+    }
+    auto fo = qrgs.options(), bo = fo.dtype(at::kBFloat16);
+    auto qo = at::empty({m, H, D}, bo), ro = at::empty({m, H, DR}, fo), go = at::empty({m, QC}, fo),
+         so = at::empty({m, H}, fo);
+    auto ko = local ? at::empty({0}, bo) : at::empty({m, HK, D}, bo),
+         vo = local ? at::empty({0}, bo) : at::empty({m, HK, D}, bo);
+    const float *raw = qrgs.data_ptr<float>(), *ks = k.data_ptr<float>(), *vs = v.data_ptr<float>(),
+                *qsc = qs.data_ptr<float>(), *rsc = rs.data_ptr<float>(), *wk = kw.data_ptr<float>(),
+                *wv = vw.data_ptr<float>();
+    auto *history = conv.data_ptr<float>();
+    auto *positions = pos.data_ptr<int64_t>(), *ring_positions = rp.data_ptr<int64_t>();
+    auto *q_out = reinterpret_cast<bf16 *>(qo.data_ptr());
+    auto *k_out = reinterpret_cast<bf16 *>((local ? *local_k : ko).data_ptr()),
+         *v_out = reinterpret_cast<bf16 *>((local ? *local_v : vo).data_ptr());
+    auto *r_out = ro.data_ptr<float>(), *gate = go.data_ptr<float>(), *sink = so.data_ptr<float>();
+    const int qstride = qrgs.stride(0), kstride = k.stride(0), vstride = v.stride(0);
+    const float ql = qlimit, rl = rlimit, ta = alpha, tf = floor,
+                normal = dyn ? 1.f / 3.f : 1.f / std::sqrt(5.f);
+    auto &queue = c10::xpu::getCurrentXPUStream(k.device().index()).queue();
+    queue.parallel_for(sycl::nd_range<1>(m * (H + 2 * HK) * D, D), [=](sycl::nd_item<1> it) {
+        const int g = it.get_group_linear_id(), row = g / (H + 2 * HK), h = g % (H + 2 * HK),
+                  lane = it.get_local_linear_id();
+        const int p = int(positions[row]);
+        if (h < H) {
+            const int dim = h * D + lane;
+            const float *x = raw + row * qstride;
+            float q = x[dim] * qsc[dim];
+            float r = lane < DR ? x[QC + h * DR + lane] * rsc[h * DR + lane] : 0.f;
+            float sq = sycl::reduce_over_group(it.get_group(), q * q, sycl::plus<float>());
+            float sr = sycl::reduce_over_group(it.get_group(), r * r, sycl::plus<float>());
+            float tau = dyn ? 1.f + ta * sycl::log(sycl::fmax((float(p) + 1.f) / tf, 1.f)) : 1.f;
+            q_out[row * QC + dim] = bf16(q * sycl::fmin(ql / (sycl::sqrt(sq) + 1e-6f), 1.f) * tau);
+            if (lane < DR)
+                r_out[(row * H + h) * DR + lane] = r * sycl::fmin(rl / (sycl::sqrt(sr) + 1e-6f), 1.f) * tau;
+            gate[row * QC + dim] = 1.f / (1.f + sycl::exp(-x[QC + RC + dim]));
+            if (lane == 0)
+                sink[row * H + h] = x[2 * QC + RC + h];
+        } else {
+            const int vk = (h - H) / HK, head = (h - H) % HK, dim = head * D + lane;
+            const float *x = vk ? vs : ks, *w = (vk ? wv : wk) + dim * 4;
+            const int stride = vk ? vstride : kstride;
+            const float *cur = x + row * stride;
+            const float z = cur[dim];
+            float sum = z * w[3];
+            if (dyn)
+                sum = sycl::fma(z, cur[KC + head * 4], sum);
+#pragma unroll
+            for (int j = 0; j < 3; ++j) {
+                const int distance = 3 - j, prior = p - distance, ix = prior >= 0 ? prior % ring : 0;
+                float past = row >= distance ? x[(row - distance) * stride + dim]
+                             : prior >= 0 && ring_positions[ix] == prior
+                                 ? history[ix * channels + vk * KC + dim]
+                                 : 0.f;
+                sum = sycl::fma(past, w[j], sum);
+                if (dyn)
+                    sum = sycl::fma(past, cur[KC + head * 4 + distance], sum);
+            }
+            history[(p % ring) * channels + vk * KC + dim] = z;
+            float val = (z + sum) * normal;
+            float ss = sycl::reduce_over_group(it.get_group(), val * val, sycl::plus<float>());
+            float scale = vk ? sycl::rsqrt(ss / D + 1e-6f) : sycl::fmin(ql / (sycl::sqrt(ss) + 1e-6f), 1.f);
+            (vk ? v_out : k_out)[(local ? p % slots : row) * KC + dim] = bf16(val * scale);
+        }
+    });
+    return {qo, ro, go, so, ko, vo};
+}
+} // namespace
+TORCH_LIBRARY(inkling_prep, m) {
+    m.def("forward(Tensor qrgs, Tensor k, Tensor v, Tensor positions, Tensor qscale, Tensor rscale, Tensor "
+          "kw, Tensor vw, Tensor(a!) conv, Tensor conv_positions, Tensor(b!)? local_k, Tensor(c!)? local_v, "
+          "float qlimit, float rlimit, float alpha, float floor) -> Tensor[]",
+          &prepare);
+}

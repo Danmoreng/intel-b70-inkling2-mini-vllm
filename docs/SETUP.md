@@ -77,8 +77,14 @@ The patch script fetches Trellis Serve at
 compiles the operators into `.work/build/`. The model adapter streams the
 expert checkpoint shards into their final packed GPU arenas. DSpark reads
 `mtp.safetensors` from the same EXL3 checkout. The launcher rejects a
-missing drafter before starting vLLM. Build `scripts/build-loop-control.sh`
-for the grouped loop controllers and router used by the coding-agent profile.
+missing drafter before starting vLLM. Build the coding kernels and check the grouped projections and local cache writes on your card.
+
+```bash
+bash scripts/build-loop-control.sh
+bash scripts/check-coding-kernels.sh
+```
+
+Decode groups Q, K and V into one Intel XMX projection. It splits each activation into two signed INT8 terms against the existing group-32 weights. A second SYCL kernel computes the short convolutions, clips the attention heads and writes the local KV ring. The prefill path retains its original weight representation.
 
 The API listens on loopback port 8093. For text with tools, use
 `/v1/chat/completions`, the model name `inkling2-mini-exl3-b70`, and standard

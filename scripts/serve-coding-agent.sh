@@ -3,7 +3,7 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 mode=${1:-dspark}
 case "$mode" in
-    dspark) export INKLING2_VLLM_DSPARK=1 ;;
+    dspark) export INKLING2_VLLM_DSPARK=1 INKLING2_EXL3_SMALL_DPAS=1 INKLING2_DRAFT_Q8_HEAD=1 INKLING2_DRAFT_REFERENCE_MATH=1 ;;
     ordinary) export INKLING2_VLLM_DSPARK=0 ;;
     *) echo "Usage: $0 [dspark|ordinary] [vLLM arguments...]" >&2; exit 2 ;;
 esac
@@ -18,8 +18,9 @@ export INKLING2_DRAFT_MAX=3 INKLING2_DSPARK_SHORTLIST=256
 export INKLING2_NATIVE_DEPTH_MIX=1 INKLING2_NATIVE_MERGE=1 INKLING2_TUNE_DENSE=1
 export INKLING2_DSPARK_SAMPLING=probabilistic INKLING2_DRAFT_SAMPLE_TOPK=20 INKLING2_DSPARK_VERIFICATION=block
 export INKLING2_KERNEL_CACHE=1 INKLING2_REASONING_BUDGET=1
+export INKLING2_QKV_LIB=/lab/.work/build/inkling2-qkv.so INKLING2_PREP_LIB=/lab/.work/build/inkling2-fused-prep.so
 export INKLING2_AGENT_TOOLS=1 INKLING2_RING_PREFIX=1
-for lib in "$INKLING2_CONTROL_LIB" "$INKLING2_EXL3_MOE_LIB"; do
+for lib in "$INKLING2_CONTROL_LIB" "$INKLING2_EXL3_MOE_LIB" "$INKLING2_QKV_LIB" "$INKLING2_PREP_LIB"; do
     test -s "${lib#/lab/}" || { echo "Missing build artifact: ${lib#/lab/}" >&2; exit 1; }
 done
 exec bash scripts/serve-vllm-exl3.sh 262144 --kv-cache-memory-bytes 4311744512 "$@"

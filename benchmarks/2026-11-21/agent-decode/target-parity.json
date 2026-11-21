@@ -1,0 +1,195 @@
+{
+  "teacher-control": {
+    "text_sha256": "1ceb7e966cefe73d8d039662e4388b57323418410bd96982a5e27b34d59d51ea",
+    "prefix_tokens": 1021,
+    "scored_tokens": 96,
+    "against_ordinary": {
+      "4": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 5.6967253136974705e-09,
+        "reference_nll": 0.3784581124782562,
+        "candidate_nll": 0.37845802307128906,
+        "max_abs_logit_delta": 0.10134744644165039
+      },
+      "8": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 5.6967253136974705e-09,
+        "reference_nll": 0.3784581124782562,
+        "candidate_nll": 0.37845802307128906,
+        "max_abs_logit_delta": 0.10134744644165039
+      }
+    }
+  },
+  "teacher-qualified": {
+    "text_sha256": "1ceb7e966cefe73d8d039662e4388b57323418410bd96982a5e27b34d59d51ea",
+    "prefix_tokens": 1021,
+    "scored_tokens": 96,
+    "against_ordinary": {
+      "4": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 2.952838485725806e-06,
+        "reference_nll": 0.351161390542984,
+        "candidate_nll": 0.3513045012950897,
+        "max_abs_logit_delta": 7.591874599456787
+      },
+      "8": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 3.2303360057994723e-06,
+        "reference_nll": 0.351161390542984,
+        "candidate_nll": 0.35138139128685,
+        "max_abs_logit_delta": 7.5636887550354
+      }
+    },
+    "against_reference": {
+      "positions": 96,
+      "same_top1": 95,
+      "mean_forward_kl": 0.005235849414020777,
+      "reference_nll": 0.3784581124782562,
+      "candidate_nll": 0.351161390542984,
+      "max_abs_logit_delta": 11.011473655700684
+    }
+  },
+  "teacher-group-prep": {
+    "text_sha256": "1ceb7e966cefe73d8d039662e4388b57323418410bd96982a5e27b34d59d51ea",
+    "prefix_tokens": 1021,
+    "scored_tokens": 96,
+    "against_ordinary": {
+      "4": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 7.552700844826177e-05,
+        "reference_nll": 0.3814004361629486,
+        "candidate_nll": 0.37998509407043457,
+        "max_abs_logit_delta": 2.630885601043701
+      },
+      "8": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 7.862549682613462e-05,
+        "reference_nll": 0.3814004361629486,
+        "candidate_nll": 0.38006505370140076,
+        "max_abs_logit_delta": 2.630885601043701
+      }
+    },
+    "against_reference": {
+      "positions": 96,
+      "same_top1": 95,
+      "mean_forward_kl": 0.009325745515525341,
+      "reference_nll": 0.351161390542984,
+      "candidate_nll": 0.3814004361629486,
+      "max_abs_logit_delta": 13.161474227905273
+    }
+  },
+  "teacher-packed": {
+    "text_sha256": "1ceb7e966cefe73d8d039662e4388b57323418410bd96982a5e27b34d59d51ea",
+    "prefix_tokens": 1021,
+    "scored_tokens": 96,
+    "against_ordinary": {
+      "4": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 5.176737886358751e-06,
+        "reference_nll": 0.3555561304092407,
+        "candidate_nll": 0.3555956780910492,
+        "max_abs_logit_delta": 6.961010932922363
+      },
+      "8": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 5.356877863960108e-06,
+        "reference_nll": 0.3555561304092407,
+        "candidate_nll": 0.35539722442626953,
+        "max_abs_logit_delta": 6.954930305480957
+      }
+    },
+    "against_reference": {
+      "positions": 96,
+      "same_top1": 96,
+      "mean_forward_kl": 0.0005132728256285191,
+      "reference_nll": 0.351161390542984,
+      "candidate_nll": 0.3555561304092407,
+      "max_abs_logit_delta": 10.471037864685059
+    }
+  },
+  "selected-target": {
+    "text_sha256": "1ceb7e966cefe73d8d039662e4388b57323418410bd96982a5e27b34d59d51ea",
+    "prefix_tokens": 1021,
+    "scored_tokens": 96,
+    "against_ordinary": {
+      "4": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 0.0002889615425374359,
+        "reference_nll": 0.3814004361629486,
+        "candidate_nll": 0.3879006803035736,
+        "max_abs_logit_delta": 6.469943046569824
+      },
+      "8": {
+        "positions": 96,
+        "same_top1": 96,
+        "mean_forward_kl": 0.00028687570011243224,
+        "reference_nll": 0.3814004361629486,
+        "candidate_nll": 0.3878844976425171,
+        "max_abs_logit_delta": 6.469943046569824
+      }
+    }
+  },
+  "selected-ring": {
+    "prefix": 8192,
+    "discarded": 128,
+    "followup": 23,
+    "positions": 23,
+    "same_top1": 23,
+    "mean_forward_kl": 0.00034707546001300216,
+    "reference_nll": 0.3398892283439636,
+    "candidate_nll": 0.3433312475681305,
+    "max_abs_logit_delta": 8.336580276489258
+  },
+  "exl3-parity": [
+    {
+      "dtype": "float16",
+      "rows": 1,
+      "rel_l2": 0.00079
+    },
+    {
+      "dtype": "float16",
+      "rows": 4,
+      "rel_l2": 0.00063
+    },
+    {
+      "dtype": "float16",
+      "rows": 8,
+      "rel_l2": 0.00065
+    },
+    {
+      "dtype": "float16",
+      "rows": 256,
+      "rel_l2": 0.00067
+    },
+    {
+      "dtype": "bfloat16",
+      "rows": 1,
+      "rel_l2": 0.00183
+    },
+    {
+      "dtype": "bfloat16",
+      "rows": 4,
+      "rel_l2": 0.0018
+    },
+    {
+      "dtype": "bfloat16",
+      "rows": 8,
+      "rel_l2": 0.00175
+    },
+    {
+      "dtype": "bfloat16",
+      "rows": 256,
+      "rel_l2": 0.00178
+    }
+  ],
+  "fused_qkv_max_relative_l2": 4.3419036956038326e-05
+}

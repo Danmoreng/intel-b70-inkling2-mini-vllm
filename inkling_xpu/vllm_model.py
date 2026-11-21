@@ -82,6 +82,8 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         min_dpas = int(os.environ.get("INKLING2_EXL3_PREFILL_MIN", "1025"))
         moe_ops().moe_set_prefill_min_m(min_dpas)
         moe_ops().moe_set_pair_max_m(int(os.environ.get("INKLING2_EXL3_PAIR_MAX", "8")))
+        if os.environ.get("INKLING2_EXL3_SMALL_DPAS") == "1":
+            moe_ops().moe_set_tiny_dpas(4, 9, 18)
         experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
                    for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)

@@ -68,6 +68,963 @@
   ],
   "inkling": [
     {
+      "run": "dspark-combo-agent-heldout",
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 911701,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 51.97772635400179,
+      "output_tokens": 4235,
+      "engine_decode_tps": 88.5138848809984,
+      "proposed": 4572.0,
+      "accepted": 2712.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 808,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.7418588069995167
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 876,
+          "cached": 832,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1672301560029155
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1940,
+          "cached": 976,
+          "out": 3754,
+          "reasoning_tokens": 2261,
+          "wall_seconds": 44.89532603400221
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5754,
+          "cached": 5680,
+          "out": 189,
+          "reasoning_tokens": 163,
+          "wall_seconds": 2.666561523998098
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 6069,
+          "cached": 5936,
+          "out": 157,
+          "reasoning_tokens": 6,
+          "wall_seconds": 2.365928086997883
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-heldout",
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 912101,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 73.75130078100119,
+      "output_tokens": 5992,
+      "engine_decode_tps": 86.10300654817208,
+      "proposed": 6648.0,
+      "accepted": 3776.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 808,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.790188187998865
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 876,
+          "cached": 832,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1334419820013864
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1940,
+          "cached": 976,
+          "out": 5343,
+          "reasoning_tokens": 3868,
+          "wall_seconds": 64.77642184400247
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 7347,
+          "cached": 7280,
+          "out": 204,
+          "reasoning_tokens": 178,
+          "wall_seconds": 2.6963453210009902
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 7677,
+          "cached": 7536,
+          "out": 310,
+          "reasoning_tokens": 5,
+          "wall_seconds": 4.215389280001546
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-heldout",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 911701,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 54.88290696000331,
+      "output_tokens": 4615,
+      "engine_decode_tps": 90.12576802354049,
+      "proposed": 4890.0,
+      "accepted": 2982.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.7343197650006914
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 778,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1259251129995391
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1647,
+          "cached": 880,
+          "out": 3133,
+          "reasoning_tokens": 2208,
+          "wall_seconds": 37.05113051399894
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 4844,
+          "cached": 4768,
+          "out": 1091,
+          "reasoning_tokens": 5,
+          "wall_seconds": 12.1134174660001
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5961,
+          "cached": 5920,
+          "out": 52,
+          "reasoning_tokens": 26,
+          "wall_seconds": 0.7657786950003356
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 6139,
+          "cached": 6000,
+          "out": 203,
+          "reasoning_tokens": 26,
+          "wall_seconds": 2.945635995001794
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-heldout",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 912101,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 51.64830828200138,
+      "output_tokens": 4303,
+      "engine_decode_tps": 90.36153257455099,
+      "proposed": 4545.0,
+      "accepted": 2784.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.7374238330012304
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 778,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.0997385490009037
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1647,
+          "cached": 880,
+          "out": 2302,
+          "reasoning_tokens": 1269,
+          "wall_seconds": 27.903150043002825
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 4015,
+          "cached": 3936,
+          "out": 1474,
+          "reasoning_tokens": 208,
+          "wall_seconds": 16.63821281699711
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5515,
+          "cached": 5488,
+          "out": 61,
+          "reasoning_tokens": 35,
+          "wall_seconds": 0.6994368669984397
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5702,
+          "cached": 5568,
+          "out": 330,
+          "reasoning_tokens": 23,
+          "wall_seconds": 4.426287726000737
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 36.624516227999266,
+      "output_tokens": 3094,
+      "engine_decode_tps": 92.18545402282093,
+      "proposed": 3204.0,
+      "accepted": 2028.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.7370061460023862
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 718,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1032917670017923
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1529,
+          "cached": 816,
+          "out": 2340,
+          "reasoning_tokens": 1189,
+          "wall_seconds": 26.28142358599871
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3932,
+          "cached": 3856,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.5274422610018519
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 4087,
+          "cached": 3952,
+          "out": 594,
+          "reasoning_tokens": 282,
+          "wall_seconds": 7.8313987879992055
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 49.19621986199854,
+      "output_tokens": 4339,
+      "engine_decode_tps": 93.3334719570046,
+      "proposed": 4434.0,
+      "accepted": 2862.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.7335747830002219
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 718,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1337546610011486
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1529,
+          "cached": 816,
+          "out": 3901,
+          "reasoning_tokens": 2871,
+          "wall_seconds": 42.48717398200097
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5489,
+          "cached": 5424,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.4957112030024291
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5644,
+          "cached": 5504,
+          "out": 278,
+          "reasoning_tokens": 44,
+          "wall_seconds": 4.205823619999137
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 49.68500027100163,
+      "output_tokens": 4095,
+      "engine_decode_tps": 86.40643183742377,
+      "proposed": 4542.0,
+      "accepted": 2580.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.6838972510013264
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 684,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1566881889993965
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1572,
+          "cached": 784,
+          "out": 3524,
+          "reasoning_tokens": 2899,
+          "wall_seconds": 41.507322559002205
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5152,
+          "cached": 5088,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.4998429840015888
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5325,
+          "cached": 5168,
+          "out": 411,
+          "reasoning_tokens": 128,
+          "wall_seconds": 5.6951255230014795
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 58.64530727800229,
+      "output_tokens": 4833,
+      "engine_decode_tps": 85.84077427650382,
+      "proposed": 5394.0,
+      "accepted": 3032.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.6859817059994384
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 684,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1564404029995785
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1572,
+          "cached": 784,
+          "out": 3872,
+          "reasoning_tokens": 3212,
+          "wall_seconds": 46.235997257001145
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5507,
+          "cached": 5440,
+          "out": 194,
+          "reasoning_tokens": 168,
+          "wall_seconds": 2.505214510998485
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5851,
+          "cached": 5696,
+          "out": 630,
+          "reasoning_tokens": 399,
+          "wall_seconds": 7.914560517998325
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 28.967070524002338,
+      "output_tokens": 2285,
+      "engine_decode_tps": 91.13053912930772,
+      "proposed": 2418.0,
+      "accepted": 1479.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.6545090990002791
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 716,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 2.17658166199908
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1527,
+          "cached": 816,
+          "out": 1806,
+          "reasoning_tokens": 728,
+          "wall_seconds": 21.248701525997603
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3392,
+          "cached": 3328,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.5193267799986643
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3547,
+          "cached": 3408,
+          "out": 321,
+          "reasoning_tokens": 33,
+          "wall_seconds": 4.2217097009997815
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 40.25858905000132,
+      "output_tokens": 3663,
+      "engine_decode_tps": 105.46642765469385,
+      "proposed": 3312.0,
+      "accepted": 2559.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.6583506599999964
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 716,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1537780569997267
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1527,
+          "cached": 816,
+          "out": 1512,
+          "reasoning_tokens": 2,
+          "wall_seconds": 16.363156737999816
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 3106,
+          "cached": 3024,
+          "out": 1749,
+          "reasoning_tokens": 523,
+          "wall_seconds": 17.961635730000125
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 4920,
+          "cached": 4848,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.5264208970002073
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5075,
+          "cached": 4928,
+          "out": 244,
+          "reasoning_tokens": 42,
+          "wall_seconds": 3.4563715949989273
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 26.3741903859991,
+      "output_tokens": 2115,
+      "engine_decode_tps": 87.52661670985184,
+      "proposed": 2319.0,
+      "accepted": 1339.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.653705238000839
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.2082609480021347
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1738,
+          "reasoning_tokens": 1141,
+          "wall_seconds": 20.765984865000064
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3368,
+          "cached": 3296,
+          "out": 90,
+          "reasoning_tokens": 64,
+          "wall_seconds": 1.3676549929987232
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3608,
+          "cached": 3456,
+          "out": 152,
+          "reasoning_tokens": 62,
+          "wall_seconds": 2.2413702459998603
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 18.120199557997694,
+      "output_tokens": 1391,
+      "engine_decode_tps": 88.53089081527253,
+      "proposed": 1509.0,
+      "accepted": 887.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.6382704319985351
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1782340239988116
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1016,
+          "reasoning_tokens": 318,
+          "wall_seconds": 12.23983512900304
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 2646,
+          "cached": 2576,
+          "out": 125,
+          "reasoning_tokens": 99,
+          "wall_seconds": 1.9116704919979384
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 2921,
+          "cached": 2768,
+          "out": 115,
+          "reasoning_tokens": 2,
+          "wall_seconds": 2.015367051000794
+        }
+      ]
+    },
+    {
       "run": "spec3-panel-none-panel",
       "fixture": "mtp-cache-followup-20261111-rangeset",
       "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
@@ -95,6 +1052,7 @@
           "input": 648,
           "cached": 0,
           "out": 31,
+          "reasoning_tokens": 5,
           "wall_seconds": null
         },
         {
@@ -107,6 +1065,7 @@
           "input": 716,
           "cached": 672,
           "out": 104,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -117,6 +1076,7 @@
           "input": 1527,
           "cached": 816,
           "out": 1441,
+          "reasoning_tokens": 384,
           "wall_seconds": null
         },
         {
@@ -127,6 +1087,7 @@
           "input": 3027,
           "cached": 2960,
           "out": 23,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -135,6 +1096,7 @@
           "input": 3168,
           "cached": 3040,
           "out": 127,
+          "reasoning_tokens": 6,
           "wall_seconds": null
         }
       ]
@@ -167,6 +1129,7 @@
           "input": 648,
           "cached": 0,
           "out": 31,
+          "reasoning_tokens": 5,
           "wall_seconds": null
         },
         {
@@ -179,6 +1142,7 @@
           "input": 716,
           "cached": 672,
           "out": 104,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -189,6 +1153,7 @@
           "input": 1527,
           "cached": 816,
           "out": 1790,
+          "reasoning_tokens": 809,
           "wall_seconds": null
         },
         {
@@ -199,6 +1164,7 @@
           "input": 3389,
           "cached": 3312,
           "out": 23,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -207,6 +1173,7 @@
           "input": 3530,
           "cached": 3408,
           "out": 121,
+          "reasoning_tokens": 28,
           "wall_seconds": null
         }
       ]
@@ -239,6 +1206,7 @@
           "input": 614,
           "cached": 0,
           "out": 31,
+          "reasoning_tokens": 5,
           "wall_seconds": null
         },
         {
@@ -251,6 +1219,7 @@
           "input": 682,
           "cached": 640,
           "out": 104,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -261,6 +1230,7 @@
           "input": 1570,
           "cached": 784,
           "out": 1100,
+          "reasoning_tokens": 549,
           "wall_seconds": null
         },
         {
@@ -271,6 +1241,7 @@
           "input": 2730,
           "cached": 2656,
           "out": 79,
+          "reasoning_tokens": 53,
           "wall_seconds": null
         },
         {
@@ -279,6 +1250,7 @@
           "input": 2945,
           "cached": 2800,
           "out": 168,
+          "reasoning_tokens": 88,
           "wall_seconds": null
         }
       ]
@@ -311,6 +1283,7 @@
           "input": 614,
           "cached": 0,
           "out": 31,
+          "reasoning_tokens": 5,
           "wall_seconds": null
         },
         {
@@ -323,6 +1296,7 @@
           "input": 682,
           "cached": 640,
           "out": 104,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -333,6 +1307,7 @@
           "input": 1570,
           "cached": 784,
           "out": 1571,
+          "reasoning_tokens": 1002,
           "wall_seconds": null
         },
         {
@@ -343,6 +1318,7 @@
           "input": 3206,
           "cached": 3136,
           "out": 23,
+          "reasoning_tokens": 0,
           "wall_seconds": null
         },
         {
@@ -351,6 +1327,7 @@
           "input": 3365,
           "cached": 3216,
           "out": 154,
+          "reasoning_tokens": 48,
           "wall_seconds": null
         }
       ]
