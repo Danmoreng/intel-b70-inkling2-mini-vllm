@@ -10,6 +10,7 @@ import shutil
 import tempfile
 import time
 import urllib.request
+from uuid import uuid4
 
 
 SYSTEM = (
@@ -29,8 +30,8 @@ def request(args, messages, tools, seed, salt, remaining):
         seed=seed,
         cache_salt=salt,
         temperature=args.temperature,
-        top_p=0.95,
-        top_k=20,
+        top_p=args.top_p,
+        top_k=args.top_k,
         min_p=0.0,
         presence_penalty=0.0,
         frequency_penalty=0.0,
@@ -65,6 +66,7 @@ def run_task(args, runner, fixture, seed, project):
     complete = False
     visible_pass = False
     error = ""
+    salt = uuid4().hex
     metrics_before = helper.snapshot(args.url)
     start = time.monotonic()
     try:
@@ -73,7 +75,7 @@ def run_task(args, runner, fixture, seed, project):
             if remaining < 1:
                 raise TimeoutError("task time limit")
             turn_start = time.monotonic()
-            result = request(args, messages, tools, seed + step, identity + str(seed), remaining)
+            result = request(args, messages, tools, seed + step, salt, remaining)
             choice = result["choices"][0]
             msg = choice["message"]
             calls = msg.get("tool_calls") or []
@@ -123,8 +125,13 @@ def run_task(args, runner, fixture, seed, project):
     except Exception as exc:
         error = str(exc)
     elapsed = time.monotonic() - start
-    after = helper.snapshot(args.url)
-    delta = {k: after[k] - v for k, v in metrics_before.items()}
+    metrics_error = ""
+    try:
+        after = helper.snapshot(args.url)
+        delta = {k: after[k] - v for k, v in metrics_before.items()}
+    except OSError as exc:
+        metrics_error = str(exc)
+        delta = {}
     hidden = runner.isolated(project, args.image, fixture / "acceptance/test_acceptance.py")
     generated = sum(t["usage"]["completion_tokens"] for t in turns)
     return dict(
@@ -133,6 +140,8 @@ def run_task(args, runner, fixture, seed, project):
         seed=seed,
         reasoning_effort=args.effort,
         temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         max_output=args.max_output,
         thinking_budget=args.thinking_budget,
         wall_seconds=elapsed,
@@ -145,7 +154,8 @@ def run_task(args, runner, fixture, seed, project):
         turns=turns,
         output_tokens=generated,
         engine_metrics=delta,
-        decode_tps=(generated - len(turns)) / delta["decode_seconds"] if delta["decode_seconds"] else None,
+        metrics_error=metrics_error,
+        decode_tps=(generated - len(turns)) / delta["decode_seconds"] if delta.get("decode_seconds") else None,
     )
 
 
@@ -158,6 +168,8 @@ def main():
     parser.add_argument("--model", default="inkling2-mini-exl3-b70")
     parser.add_argument("--effort", default="none", choices=["none", "low", "medium"])
     parser.add_argument("--thinking-budget", type=int)
+    parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--temperature", default=1.0, type=float)
     parser.add_argument("--max-output", type=int, default=8192)
     parser.add_argument("--wall", type=int, default=450)

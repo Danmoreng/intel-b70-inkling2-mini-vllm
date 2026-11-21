@@ -245,5 +245,114 @@
       }
     ]
   },
-  "synthetic": "Passed cumulative 8192, zero budget, proposal rollback, slot reuse and prompt-tail checks."
+  "synthetic": "Passed cumulative 8192, zero budget, proposal rollback, slot reuse and prompt-tail checks.",
+  "original_api_control": [
+    {
+      "budget": 8,
+      "seed": 8870,
+      "used": 8,
+      "output": 512,
+      "answer": true,
+      "thinking_messages": 1
+    },
+    {
+      "budget": 8,
+      "seed": 8872,
+      "used": 8,
+      "output": 512,
+      "answer": true,
+      "thinking_messages": 1
+    },
+    {
+      "budget": 8,
+      "seed": 8874,
+      "used": 8,
+      "output": 512,
+      "answer": true,
+      "thinking_messages": 1
+    },
+    {
+      "budget": 32,
+      "seed": 8874,
+      "used": 32,
+      "output": 512,
+      "answer": true,
+      "thinking_messages": 1
+    },
+    {
+      "budget": 0,
+      "seed": 8870,
+      "used": 0,
+      "output": 512,
+      "answer": false,
+      "thinking_messages": 171
+    },
+    {
+      "budget": 96,
+      "seed": 8871,
+      "used": 96,
+      "output": 512,
+      "answer": true,
+      "thinking_messages": 1
+    }
+  ],
+  "repeated_original_routefix_control": {
+    "fixture": "mtp-next-routefix-v2",
+    "seed": 912101,
+    "correct": true,
+    "wall_seconds": 158.20108093299496,
+    "output_tokens": 13219,
+    "thinking_budget": 8192,
+    "turns": [
+      {
+        "completion_tokens": 33,
+        "reasoning_tokens": 7,
+        "thinking_spans": [
+          7
+        ],
+        "tools": [
+          "list_files"
+        ]
+      },
+      {
+        "completion_tokens": 104,
+        "reasoning_tokens": 0,
+        "thinking_spans": [],
+        "tools": [
+          "read_file",
+          "read_file",
+          "read_file"
+        ]
+      },
+      {
+        "completion_tokens": 9919,
+        "reasoning_tokens": 8362,
+        "thinking_spans": [
+          8192,
+          170
+        ],
+        "tools": [
+          "write_file"
+        ]
+      },
+      {
+        "completion_tokens": 433,
+        "reasoning_tokens": 407,
+        "thinking_spans": [
+          407
+        ],
+        "tools": [
+          "run_tests"
+        ]
+      },
+      {
+        "completion_tokens": 2730,
+        "reasoning_tokens": 2307,
+        "thinking_spans": [
+          2307
+        ],
+        "tools": []
+      }
+    ]
+  }
 }

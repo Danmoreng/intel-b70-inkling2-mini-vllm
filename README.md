@@ -25,6 +25,8 @@ These measurements use one 32 GB Arc Pro B70, one active request and the full 26
 
 With medium reasoning and a cumulative 8,192-token budget, two 5K code prompts reached 59.16 and 58.82 client tok/s in ordinary mode, up from 58.14 and 57.77. The rebuilt DSpark profile with fused draft taps reached 84.59 and 83.66 on those prompts. At 196,608 input tokens, ordinary measured 1,394 prefill / 43.22 decode tok/s and fused DSpark measured 1,389 / 64.71. Both cold requests retrieved the code. On two cold source prompts of about 232K tokens, fused DSpark reached 76.73 and 68.21 client decode tok/s with 1,312–1,316 prefill tok/s. The coding profile uses 128 target partitions for four verification rows from 196,608 tokens. Set `INKLING2_DSPARK_LONG_SPLITS=0` to compare the old schedule and `INKLING2_DRAFT_FUSED_TAPS=0` to compare the tensor implementation of the draft input mix. [Five-experiment study, task times and reproduction commands](benchmarks/2026-11-21/agent-tuning/README.md)
 
+On the four original editing cases with medium reasoning, fused DSpark and the matched tensor implementation both solved all four, in 190.27 and 206.34 s respectively. The archived Qwen run solved the same four in 145.88 s. Fused Inkling generated 16,219 tokens across tool turns versus 8,130 for Qwen. [Matched task runs and thinking-budget checks](benchmarks/2026-11-21/agent-tuning/README.md)
+
 ### Earlier reference runs
 
 | Frozen source review | Ordinary client tok/s | DSpark client tok/s | Archived Qwen client tok/s |
