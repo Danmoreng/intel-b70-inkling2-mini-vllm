@@ -19,6 +19,7 @@ def counters(base):
         "request_decode_time_seconds_sum",
         "request_decode_time_seconds_count",
         "prompt_tokens_cached_total",
+        "spec_decode_num_drafts_total",
         "spec_decode_num_draft_tokens_total",
         "spec_decode_num_accepted_tokens_total",
     )
@@ -41,10 +42,12 @@ def replay(args, folder):
         cache_salt=uuid4().hex,
         model=args.model,
         messages=[dict(role="user", content=prompt)],
-        reasoning_effort="none",
+        reasoning_effort=args.effort,
         stream=True,
         stream_options=dict(include_usage=True),
     )
+    if args.thinking_budget is not None:
+        payload["thinking_token_budget"] = args.thinking_budget
     req = urllib.request.Request(
         args.url + "/v1/chat/completions", json.dumps(payload).encode(), {"Content-Type": "application/json"}
     )
@@ -53,6 +56,7 @@ def replay(args, folder):
     ttft = None
     usage = None
     generated = []
+    thought = []
     with urllib.request.urlopen(req, timeout=300) as resp:
         for entry in resp:
             if not entry.startswith(b"data: ") or entry[6:].strip() == b"[DONE]":
@@ -64,6 +68,7 @@ def replay(args, folder):
                 usage = packet["usage"]
             for choice in packet.get("choices") or []:
                 delta = choice["delta"]
+                thought.append(delta.get("reasoning") or delta.get("reasoning_content") or "")
                 if delta.get("content"):
                     generated.append(delta["content"])
                 if ttft is None and any(
@@ -88,8 +93,12 @@ def replay(args, folder):
     review = "".join(generated)
     return dict(
         case=folder.name,
+        reasoning_effort=args.effort,
+        thinking_budget=args.thinking_budget,
         prompt_sha256=digest,
         response_sha256=hashlib.sha256(review.encode()).hexdigest(),
+        reasoning_sha256=hashlib.sha256("".join(thought).encode()).hexdigest(),
+        reasoning_tokens=(usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
         reviewed_files_mentioned=[
             name for name in recorded.get("source_paths", []) if Path(name).name in review
         ],
@@ -101,6 +110,7 @@ def replay(args, folder):
         client_decode_tps=(usage["completion_tokens"] - 1) / (wall - ttft),
         prefill_tps=(tokens - cached) / stat["request_prefill_time_seconds_sum"],
         decode_tps=(usage["completion_tokens"] - 1) / stat["request_decode_time_seconds_sum"],
+        spec_steps=stat["spec_decode_num_drafts_total"],
         drafted=stat["spec_decode_num_draft_tokens_total"],
         accepted=stat["spec_decode_num_accepted_tokens_total"],
     )
@@ -108,6 +118,8 @@ def replay(args, folder):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--effort", default="none", choices=["none", "low", "medium"])
+    p.add_argument("--thinking-budget", type=int)
     p.add_argument("--archive", type=Path, required=True)
     p.add_argument("--cases", nargs="+", required=True)
     p.add_argument("--output", type=Path, required=True)

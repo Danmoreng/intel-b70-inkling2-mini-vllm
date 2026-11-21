@@ -1,0 +1,76 @@
+--- a/xpu/csrc/exl3_moe.sycl
++++ b/xpu/csrc/exl3_moe.sycl
+@@ -139,7 +139,7 @@
+ 
+ // ------------------------------------------------------------------------------------------------
+ // gate|up (+ SiLU + down input Hadamard). Threads: T = 4 * P  (proj x 2 strips of NT=4 tiles x P k-splits).
+-template <int K, int MR, int P, typename TIn>
++template <int K, int MR, int P, typename TIn, bool prepared = false>
+ struct GateUpKernel {
+     const TIn* x; int x_stride;
+     const int64_t* ptrs;
+@@ -201,7 +201,10 @@
+                 simd<float, 128> su = convert<float>(block_load<fp16, 128>(suh + kb * 128));
+ #pragma unroll
+                 for (int m = 0; m < MR; ++m) {
+-                    if (tok[m] >= 0) {
++                    if constexpr (prepared) {
++                        xblk.template select<128, 1>(m * 128) =
++                            block_load<fp16, 128>(x + (a * 2 + proj) * H + kb * 128);
++                    } else if (tok[m] >= 0) {
+ #ifdef EXL3_MOE_PROBE_NOHAD
+                         xblk.template select<128, 1>(m * 128) = convert<fp16>(block_load<TIn, 128>(x + (size_t)tok[m] * x_stride + kb * 128));
+                         continue;
+@@ -772,10 +775,31 @@
+ static int g_gu_p = 5, g_dn_p = 0;
+ void moe_set_splits(int64_t gu_p, int64_t dn_p) { g_gu_p = (int)gu_p; g_dn_p = (int)dn_p; }
+ 
+-template <int K, int MR, int P, typename TIn>
++// At M=1 the input transform is shared by all nine output groups and both strips.
++struct PrepareGateInput {
++    static constexpr int width = 2304, block = 128, tiles = width / block;
++    const bf16* input;
++    const int* ids;
++    const int64_t* expert_ptrs;
++    size_t scale_offset;
++    fp16* output;
++    void operator()(sycl::nd_item<1> item) const SYCL_ESIMD_KERNEL {
++        int index = item.get_global_linear_id();
++        int route = index / (2 * tiles), proj = (index / tiles) % 2, offset = (index % tiles) * block;
++        const auto* blob = reinterpret_cast<const uint8_t*>(expert_ptrs[ids[route]]);
++        const auto* scales = reinterpret_cast<const fp16*>(blob + scale_offset) + proj * width;
++        auto values = convert<float>(block_load<bf16, 128>(input + offset))
++                    * convert<float>(block_load<fp16, 128>(scales + offset));
++        values = convert<float>(convert<fp16>(values));
++        fwht128(values);
++        block_store<fp16, 128>(output + index * 128, convert<fp16>(values * kRsqrt128));
++    }
++};
++
++template <int K, int MR, int P, typename TIn, bool prepared = false>
+ static void launch_gateup(sycl::queue& q, const TIn* x, int x_stride, const int64_t* ptrs, Route rt, fp16* abuf,
+                           int H, int I, const Geom& gm, int max_act) {
+-    GateUpKernel<K, MR, P, TIn> k{x, x_stride, ptrs, rt, abuf, H, I, gm.off_suh_g(), gm.off_svh_g(), gm.off_suh_d(),
++    GateUpKernel<K, MR, P, TIn, prepared> k{x, x_stride, ptrs, rt, abuf, H, I, gm.off_suh_g(), gm.off_svh_g(), gm.off_suh_d(),
+                                   (int)((gm.blob() - gm.off_suh_g()) / 4)};
+     int T = 4 * P;
+     size_t n = (size_t)max_act * (I / 128) * T;
+@@ -1356,7 +1380,17 @@
+         TORCH_CHECK((H % 512 == 0 && I % 512 == 0) || (H == 2304 && I == 1152),
+                     "moe K=4: unsupported geometry");
+         if (!(g_debug_skip & 1)) {
+-            if (x.scalar_type() == at::kHalf)
++            if (M == 1 && topk == 8 && pair_mode && !fill && H == 2304 && I == 1152 &&
++                x.scalar_type() == at::kBFloat16) {
++                auto transformed = at::empty({topk, 2, H}, x.options().dtype(at::kHalf));
++                auto* data = reinterpret_cast<fp16*>(transformed.data_ptr());
++                PrepareGateInput prepare{reinterpret_cast<const bf16*>(x.data_ptr()), topk_ids.data_ptr<int>(),
++                                         pp, gm.off_suh_g(), data};
++                q.submit([&](sycl::handler& h) {
++                    h.parallel_for(sycl::nd_range<1>(topk * 2 * PrepareGateInput::tiles, 1), prepare);
++                });
++                launch_gateup<4, 1, 2, fp16, true>(q, data, H, pp, rb.rt, ab, H, I, gm, max_act);
++            } else if (x.scalar_type() == at::kHalf)
+                 gateup_dispatch_k4<fp16>(MR, q, reinterpret_cast<const fp16*>(x.data_ptr()), x.stride(0), pp, rb.rt, ab, H, I, gm, max_act);
+             else if (x.scalar_type() == at::kBFloat16)
+                 gateup_dispatch_k4<bf16>(MR, q, reinterpret_cast<const bf16*>(x.data_ptr()), x.stride(0), pp, rb.rt, ab, H, I, gm, max_act);
