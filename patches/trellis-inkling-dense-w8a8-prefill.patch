@@ -1,0 +1,49 @@
+diff --git a/xpu/exl3xpu/inkling2/dense.py b/xpu/exl3xpu/inkling2/dense.py
+index ba5fd30..c0d9b3b 100644
+--- a/xpu/exl3xpu/inkling2/dense.py
++++ b/xpu/exl3xpu/inkling2/dense.py
+@@ -2,11 +2,18 @@
+ small-M decode/verify through the SYCL GEMV (inkling2_xpu.moe_gemv with one 'expert')."""
+ from __future__ import annotations
+ 
++import os
++
+ import torch
+ 
+ from . import moe_triton as _mt
+ from .moe_triton import ops
+ 
++W8A8_PREFILL = os.environ.get("INKLING2_PREFILL_W8A8", "0") == "1"
++W8A8_LIBRARY = os.environ.get("INKLING2_W8A8_LIBRARY")
++if W8A8_PREFILL and W8A8_LIBRARY:
++    torch.ops.load_library(W8A8_LIBRARY)
++
+ 
+ def quant_q8(w: torch.Tensor, group: int = 32):
+     """bf16 [N, K] -> int8 [1, N, K], fp16 scales [1, N, K/group] (symmetric, absmax)."""
+@@ -45,6 +52,12 @@ class Q8Linear:
+             self.q, self.s, self.alpha = quant_fp4(w)
+         else:
+             self.q, self.s = quant_q8(w)
++        self.w8a8 = None
++        if W8A8_PREFILL and keep_bf16 and self.K % 16 == 0 and self.N % 16 == 0:
++            weights = self.w.float()
++            scales = weights.abs().amax(1).clamp_min(1e-8) / 127
++            packed = torch.round(weights / scales[:, None]).clamp(-127, 127).to(torch.int8)
++            self.w8a8 = packed.T.contiguous(), scales
+         self._align = {}
+ 
+     def _plan(self, M: int, device):
+@@ -65,4 +78,12 @@ class Q8Linear:
+             sid, eob, mb = self._plan(M, x.device)
+             ops().moe_gemv2(x.contiguous() if x.dtype == torch.float32 else x.to(torch.bfloat16).contiguous(), self.q, self.s, self.alpha, out, sid, eob, None, M, 1, mb, *_mt.GEMV_DENSE)
+             return out
++        if self.w8a8 is not None and M >= 128:
++            weights, scales = self.w8a8
++            activations = x.float()
++            if W8A8_LIBRARY:
++                return torch.ops.inkling2_xpu.dense_w8a8(activations.contiguous(), weights, scales)
++            row_scale = activations.abs().amax(1, keepdim=True).clamp_min(1e-8) / 127
++            quantized = torch.round(activations / row_scale).clamp(-127, 127).to(torch.int8).contiguous()
++            return torch._int_mm(quantized, weights).float().mul_(row_scale).mul_(scales)
+         return torch.nn.functional.linear(x.to(torch.bfloat16), self.w).float()

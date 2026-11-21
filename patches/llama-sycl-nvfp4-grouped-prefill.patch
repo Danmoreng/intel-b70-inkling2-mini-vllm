@@ -1,0 +1,92 @@
+--- a/ggml/src/ggml-sycl/common.hpp
++++ b/ggml/src/ggml-sycl/common.hpp
+@@ -96,6 +96,7 @@
+     GGML_SYCL_XMX_GATHER_Q6_K     = 1 << 12,
+     GGML_SYCL_XMX_GATHER_Q2_K     = 1 << 13,
+     GGML_SYCL_XMX_GATHER_Q3_K     = 1 << 14,
++    GGML_SYCL_XMX_GATHER_NVFP4    = 1 << 15,
+ };
+ static constexpr int GGML_SYCL_XMX_GATHER_TYPES_DEFAULT = ~0;
+ extern int g_ggml_sycl_xmx_gather_types;
+--- a/ggml/src/ggml-sycl/fused-gemm.hpp
++++ b/ggml/src/ggml-sycl/fused-gemm.hpp
+@@ -21,11 +21,15 @@
+ 
+ // weight formats the fused A stage decodes; K must cover whole stored blocks
+ constexpr bool ggml_sycl_fused_dequant_gemm_type_ok(ggml_type src0_type, int64_t K) {
+-    // iq4_nl and q8_0 store 32 values per block; every other format here is a 256-value superblock
++    // iq4_nl and q8_0 store 32 values per block. NVFP4 stores 64 with four scales.
++    // The remaining formats here use 256-value superblocks
+     // that the A stage walks in steps of 32, so K must cover whole superblocks.
+     if (src0_type == GGML_TYPE_IQ4_NL || src0_type == GGML_TYPE_Q8_0) {
+         return K % 32 == 0;
+     }
++    if (src0_type == GGML_TYPE_NVFP4) {
++        return K % QK_NVFP4 == 0;
++    }
+     const bool superblock =
+            src0_type == GGML_TYPE_Q2_K ||
+            src0_type == GGML_TYPE_Q3_K ||
+@@ -76,6 +80,7 @@
+         case GGML_TYPE_Q4_K:    return (g_ggml_sycl_xmx_gather_types & GGML_SYCL_XMX_GATHER_Q4_K    ) != 0;
+         case GGML_TYPE_Q5_K:    return (g_ggml_sycl_xmx_gather_types & GGML_SYCL_XMX_GATHER_Q5_K    ) != 0;
+         case GGML_TYPE_Q6_K:    return (g_ggml_sycl_xmx_gather_types & GGML_SYCL_XMX_GATHER_Q6_K    ) != 0;
++        case GGML_TYPE_NVFP4:   return (g_ggml_sycl_xmx_gather_types & GGML_SYCL_XMX_GATHER_NVFP4   ) != 0;
+         default:          return false;
+     }
+ }
+--- a/ggml/src/ggml-sycl/fused-gemm.cpp
++++ b/ggml/src/ggml-sycl/fused-gemm.cpp
+@@ -411,6 +411,7 @@
+ template <> struct fg_block_traits<block_iq1_s>   { static constexpr int qk = QK_K; };
+ template <> struct fg_block_traits<block_iq1_m>   { static constexpr int qk = QK_K; };
+ template <> struct fg_block_traits<block_q8_0>    { static constexpr int qk = QK8_0; };
++template <> struct fg_block_traits<block_nvfp4>   { static constexpr int qk = QK_NVFP4; };
+ template <> struct fg_block_traits<block_q2_K>    { static constexpr int qk = QK_K; };
+ template <> struct fg_block_traits<block_q3_K>    { static constexpr int qk = QK_K; };
+ template <> struct fg_block_traits<block_q4_K>    { static constexpr int qk = QK_K; };
+@@ -704,6 +705,27 @@
+ }
+ 
+ template <typename E>
++static __dpct_inline__ void fg_stage_a(const block_nvfp4 * __restrict__ xrow, const int kb, typename E::pair * a) {
++    static_assert(FG_BK == 2 * QK_NVFP4_SUB && QK_NVFP4 == 2 * FG_BK);
++    const block_nvfp4 & block = xrow[kb / 2];
++    constexpr int packed_sub = QK_NVFP4_SUB / 2;
++    const int sub0 = (kb % 2) * 2;
++#pragma unroll
++    for (int sub = 0; sub < 2; ++sub) {
++        const float scale = ggml_sycl_ue4m3_to_fp32(block.d[sub0 + sub]);
++        const uint8_t * quants = block.qs + (sub0 + sub) * packed_sub;
++        typename E::pair * row = a + sub * packed_sub;
++#pragma unroll
++        for (int p = 0; p < packed_sub / 2; ++p) {
++            const uint8_t a0 = quants[2 * p];
++            const uint8_t a1 = quants[2 * p + 1];
++            row[p] = E::make(scale * kvalues_mxfp4[a0 & 0xf], scale * kvalues_mxfp4[a1 & 0xf]);
++            row[p + packed_sub / 2] = E::make(scale * kvalues_mxfp4[a0 >> 4], scale * kvalues_mxfp4[a1 >> 4]);
++        }
++    }
++}
++
++template <typename E>
+ static __dpct_inline__ void fg_stage_a(const block_q2_K * __restrict__ xrow, const int kb, typename E::pair * a) {
+     FG_SUPERBLOCK(block_q2_K);
+     fg_decode_q2_K<E>(blk->qs, blk->scales, (float) blk->dm[0], (float) blk->dm[1], ib, a);
+@@ -1045,7 +1067,7 @@
+ template <typename T> static constexpr bool fg_plain_ok() {
+     return !std::is_same_v<T, block_q8_0> && !std::is_same_v<T, block_q2_K> && !std::is_same_v<T, block_q3_K> &&
+            !std::is_same_v<T, block_q4_K> && !std::is_same_v<T, block_q5_K> &&
+-           !std::is_same_v<T, block_q6_K>;
++           !std::is_same_v<T, block_q6_K> && !std::is_same_v<T, block_nvfp4>;
+ }
+ 
+ template <typename T, bool R> struct fg_tag {
+@@ -1083,6 +1105,7 @@
+         case GGML_TYPE_Q4_K:    return fg_visit_layout<block_q4_K>(reordered, f);
+         case GGML_TYPE_Q5_K:    return fg_visit_layout<block_q5_K>(reordered, f);
+         case GGML_TYPE_Q6_K:    return fg_visit_layout<block_q6_K>(reordered, f);
++        case GGML_TYPE_NVFP4:   return fg_visit_layout<block_nvfp4>(reordered, f);
+         default:                return false;
+     }
+ }

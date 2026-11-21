@@ -1,0 +1,39 @@
+--- a/ggml/src/ggml-sycl/fattn-dpas.cpp
++++ b/ggml/src/ggml-sycl/fattn-dpas.cpp
+@@ -204,6 +204,7 @@
+     const char *   rel;
+     const int32_t * q_pos;
+     const int32_t * rel_indices;
++    bool           skip_mask;
+     int            rel_extent;
+     int64_t        sink_query_stride, rel_head_stride, rel_query_stride;
+     int            G;      // query heads per KV head
+@@ -405,6 +406,20 @@
+                 };
+ 
+                 for (int t0 = k_begin; t0 < k_end; t0 += TK) {
++                    if (p.skip_mask) {
++                        const int key = t0 + tid;
++                        bool live = false;
++                        if (tid < TK && key < k_end) {
++                            for (int c = c0; c < q_end && !live; ++c) {
++                                const auto * row = (const sycl::half *) (mask_seq + c * p.nb31);
++                                live = (float) row[key] != -INFINITY;
++                            }
++                        }
++                        // All work-items agree before either skipping or using the tile barriers.
++                        if (!sycl::any_of_group(it.get_group(), live)) {
++                            continue;
++                        }
++                    }
+                     if constexpr (ST) {
+                         stage(Kh, p.nb11, t0);
+                         it.barrier(sycl::access::fence_space::local_space);
+@@ -637,6 +652,7 @@
+     p.q_pos = q_pos ? (const int32_t *) q_pos->data : nullptr;
+     const ggml_tensor * rel_indices = rel ? dst->src[8] : nullptr;
+     p.rel_indices = rel_indices ? (const int32_t *) rel_indices->data : nullptr;
++    p.skip_mask = rel && mask && mask->ne[2] == 1 && ggml_sycl_get_env("GGML_SYCL_FA_MASK_SKIP", 0) != 0;
+     p.rel_extent = rel ? rel->ne[0] : 0;
+     p.rel_head_stride = rel ? rel->nb[1] : 0;
+     p.rel_query_stride = rel ? rel->nb[2] : 0;

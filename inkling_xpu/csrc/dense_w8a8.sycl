@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+#include <torch/all.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+
+namespace {
+
+// Match the Qwen recipe's per-row activation scale and INT8 XMX GEMM.
+// Inkling's dense checkpoint weights use per-output-channel scales.
+at::Tensor dense_w8a8(const at::Tensor & input, const at::Tensor & weight, const at::Tensor & weight_scale) {
+    TORCH_CHECK(input.is_xpu() && input.scalar_type() == at::kFloat && input.is_contiguous() && input.dim() == 2);
+    TORCH_CHECK(weight.device() == input.device() && weight.scalar_type() == at::kChar && weight.is_contiguous() &&
+                weight.dim() == 2 && input.size(1) == weight.size(0));
+    TORCH_CHECK(weight_scale.device() == input.device() && weight_scale.is_contiguous() &&
+                weight_scale.scalar_type() == at::kFloat && weight_scale.numel() == weight.size(1));
+    const int rows = input.size(0), columns = input.size(1), outputs = weight.size(1);
+    TORCH_CHECK(rows > 0 && columns > 0 && outputs > 0);
+    auto & queue = c10::xpu::getCurrentXPUStream(input.device().index()).queue();
+    auto quantized = at::empty({rows, columns}, input.options().dtype(at::kChar));
+    auto row_scales = at::empty({rows}, input.options());
+    const float * source = input.data_ptr<float>();
+    auto * packed = quantized.data_ptr<int8_t>();
+    auto * scales = row_scales.data_ptr<float>();
+    constexpr int wg = 128;
+    queue.parallel_for(sycl::nd_range<1>(size_t(rows) * wg, wg), [=](sycl::nd_item<1> item) {
+        const size_t row = item.get_group(0);
+        const int lane = item.get_local_id(0);
+        const float * values = source + row * columns;
+        float local_max = 0.0f;
+        for (int col = lane; col < columns; col += wg) {
+            local_max = sycl::fmax(local_max, sycl::fabs(values[col]));
+        }
+        const float maximum = sycl::reduce_over_group(item.get_group(), local_max, sycl::maximum<float>());
+        const float scale = sycl::fmax(maximum, 1e-8f) / 127.0f;
+        if (lane == 0) {
+            scales[row] = scale;
+        }
+        for (int col = lane; col < columns; col += wg) {
+            const float value = sycl::clamp(sycl::rint(values[col] / scale), -127.0f, 127.0f);
+            packed[row * columns + col] = static_cast<int8_t>(value);
+        }
+    });
+    auto acc = at::_int_mm(quantized, weight);
+    auto output = at::empty({rows, outputs}, input.options());
+    const auto * src = acc.data_ptr<int32_t>();
+    const auto * weight_scales = weight_scale.data_ptr<float>();
+    auto * dst = output.data_ptr<float>();
+    queue.parallel_for(sycl::range<1>(size_t(rows) * outputs), [=](sycl::id<1> id) {
+        const size_t i = id[0];
+        dst[i] = float(src[i]) * scales[i / outputs] * weight_scales[i % outputs];
+    });
+    return output;
+}
+
+} // namespace
+
+TORCH_LIBRARY_FRAGMENT(inkling2_xpu, m) {
+    m.def("dense_w8a8(Tensor input, Tensor weight, Tensor weight_scale) -> Tensor");
+    m.impl("dense_w8a8", torch::kXPU, &dense_w8a8);
+}

@@ -1,0 +1,24 @@
+2.15.0+xpu on Intel(R) Arc(TM) Pro B70 Graphics
+paged NHD torch.bfloat16 q=1 page=16 window=0: max_abs=4.77e-07
+paged NHD torch.bfloat16 q=1 page=16 window=32: max_abs=4.17e-07
+paged NHD torch.bfloat16 q=4 page=64 window=0: max_abs=4.77e-07
+Legacy flat token-table path matches the block-table path
+paged NHD torch.bfloat16 q=4 page=64 window=32: max_abs=8.94e-07
+paged NHD torch.float8_e4m3fn q=1 page=16 window=0: max_abs=2.98e-07
+paged NHD torch.float8_e4m3fn q=1 page=16 window=32: max_abs=3.58e-07
+paged NHD torch.float8_e4m3fn q=4 page=64 window=0: max_abs=2.98e-07
+paged NHD torch.float8_e4m3fn q=4 page=64 window=32: max_abs=5.96e-07
+paged HND torch.bfloat16 q=1 page=16 window=0: max_abs=2.53e-07
+paged HND torch.bfloat16 q=1 page=16 window=32: max_abs=2.98e-07
+paged HND torch.bfloat16 q=4 page=64 window=0: max_abs=4.47e-07
+paged HND torch.bfloat16 q=4 page=64 window=32: max_abs=4.17e-07
+paged HND torch.float8_e4m3fn q=1 page=16 window=0: max_abs=2.38e-07
+paged HND torch.float8_e4m3fn q=1 page=16 window=32: max_abs=3.28e-07
+paged HND torch.float8_e4m3fn q=4 page=64 window=0: max_abs=2.98e-07
+paged HND torch.float8_e4m3fn q=4 page=64 window=32: max_abs=4.17e-07
+NVFP4 MoE H=2304 I=1152 top8: relative_l2=8.31e-06
+MXFP8 MoE H=2304 I=1152 top8: relative_l2=1.4e-07
+DPAS prefill window=0: max_abs=8.21e-05
+DPAS prefill window=128: max_abs=0.000128
+oneDNN hybrid, two prefix blocks and biased tail: relative_l2=0.000357
+PASS: 16 block-table cases, 1 legacy table case, 3 prefill cases and both MoE formats

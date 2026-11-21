@@ -1,0 +1,206 @@
+--- a/ggml/src/ggml-sycl/fattn-dpas.cpp
++++ b/ggml/src/ggml-sycl/fattn-dpas.cpp
+@@ -47,6 +47,8 @@
+     const ggml_tensor * V     = dst->src[2];
+     const ggml_tensor * mask  = dst->src[3];
+     const ggml_tensor * sinks = dst->src[4];
++    const ggml_tensor * rel   = dst->src[6];
++    const bool banded = dst->op == GGML_OP_FLASH_ATTN_EXT_BANDED;
+ 
+     if (Q->type != GGML_TYPE_F32 || (K->type != GGML_TYPE_Q4_0 && K->type != GGML_TYPE_Q8_0) || V->type != K->type ||
+         (sinks && sinks->type != GGML_TYPE_F32)) {
+@@ -55,13 +57,19 @@
+     if (!fattn_dpas_head_ok(K->ne[0]) || V->ne[0] != K->ne[0] || Q->ne[0] != K->ne[0]) {
+         return false;
+     }
+-    if (Q->ne[1] < 1 || Q->ne[1] > FA_DPAS_MAX_Q || K->ne[1] < 1) {
++    const bool per_head_mask = mask && mask->ne[2] > 1;
++    if (Q->ne[1] < 1 || (!banded && !per_head_mask && Q->ne[1] > FA_DPAS_MAX_Q) || K->ne[1] < 1) {
+         return false;
+     }
+     if (K->ne[2] < 1 || V->ne[2] != K->ne[2] || Q->ne[2] % K->ne[2] != 0 || Q->ne[2] / K->ne[2] > FA_DPAS_MAX_G) {
+         return false;
+     }
+-    if (Q->ne[3] != K->ne[3] || V->ne[3] != K->ne[3]) {
++    if (Q->ne[3] != K->ne[3] || V->ne[3] != K->ne[3] || V->ne[1] != K->ne[1]) {
++        return false;
++    }
++    if (banded && (Q->ne[3] != 1 || K->ne[1] < Q->ne[1] || !rel ||
++                   rel->type != GGML_TYPE_F32 || rel->nb[0] != sizeof(float) ||
++                   rel->ne[1] != Q->ne[2] || rel->ne[2] != Q->ne[1] || rel->ne[3] != 1)) {
+         return false;
+     }
+ 
+@@ -73,11 +81,12 @@
+         return false;
+     }
+ 
+-    if (mask && (mask->type != GGML_TYPE_F16 || mask->ne[2] != 1 || mask->nb[0] != sizeof(sycl::half) ||
++    if (mask && (mask->type != GGML_TYPE_F16 || (mask->ne[2] != 1 && mask->ne[2] != Q->ne[2]) || mask->nb[0] != sizeof(sycl::half) ||
+                  mask->ne[0] < K->ne[1] || mask->ne[1] < Q->ne[1])) {
+         return false;
+     }
+-    if (sinks && (sinks->nb[0] != sizeof(float) || sinks->ne[0] < Q->ne[2])) {
++    if (sinks && (sinks->nb[0] != sizeof(float) || sinks->ne[0] < Q->ne[2] ||
++                  (sinks->ne[1] != 1 && (!banded || sinks->ne[1] != Q->ne[1])))) {
+         return false;
+     }
+     if (Q->nb[0] != sizeof(float)) {
+@@ -182,7 +191,10 @@
+     float *        parts;  // per-split partial results, nsplit > 1 only
+     sycl::float2 * meta;   // per-split (max, sum), nsplit > 1 only
+     float          scale;
+-    const float *  sinks;  // per query head softmax sink logit, or null
++    const char *   sinks;
++    const char *   rel;
++    int            rel_extent;
++    int64_t        sink_query_stride, rel_head_stride, rel_query_stride;
+     int            G;      // query heads per KV head
+     int            nq;     // query tokens per work-group
+     int            nqc;    // token chunks
+@@ -195,7 +207,7 @@
+     int64_t        nb01, nb02, nb03;
+     int64_t        nb11, nb12, nb13;
+     int64_t        nb21, nb22, nb23;
+-    int64_t        nb31, nb33;
++    int64_t        nb31, nb32, nb33;
+ };
+ 
+ // One work-group = one KV head x nq query tokens x one slice of the keys: S = Q K^T by s8 x s4 / s8 x s8 DPAS on the
+@@ -281,8 +293,10 @@
+                 }
+                 if (tid < RMAX) {
+                     // the sink is one more key with logit sinks[head] and no value; the first key slice owns it
+-                    const bool sink = p.sinks && split == 0 && tid < R;
+-                    sM[tid] = sink ? p.sinks[kvh * G + tid % G] : FA_DPAS_MINF;
++                    const int query = c0 + tid / G;
++                    const bool sink = p.sinks && split == 0 && tid < R && query < p.ne01;
++                    const float * sink_row = sink ? (const float *) (p.sinks + query * p.sink_query_stride) : nullptr;
++                    sM[tid] = sink ? sink_row[kvh * G + tid % G] : FA_DPAS_MINF;
+                     sL[tid] = sink ? 1.0f : 0.0f;
+                     sA[tid] = 1.0f;
+                 }
+@@ -292,7 +306,7 @@
+                 const int    k_end   = sycl::min(k_begin + p.chunk, p.ne11);
+                 const char * Kh      = p.K + seq * p.nb13 + kvh * p.nb12;
+                 const char * Vh      = p.V + seq * p.nb23 + kvh * p.nb22;
+-                const sycl::half * mrow = p.mask ? (const sycl::half *) (p.mask + (seq % p.ne33) * p.nb33) : nullptr;
++                const char * mask_seq = p.mask ? p.mask + (seq % p.ne33) * p.nb33 : nullptr;
+ 
+                 // O^T: lane = query row, element m = head dim
+                 fa_dpas_float8 o[NR16][XT];
+@@ -436,9 +450,24 @@
+                                     const int r = t * 8 + m;
+                                     const int c = c0 + r / G;
+                                     if (r < R) {
+-                                        const bool  ok = jv && c < p.ne01;
+-                                        const float mv = (ok && mrow) ? static_cast<float>(mrow[((int64_t) c * p.nb31) / (int64_t) sizeof(sycl::half) + j]) : 0.0f;
+-                                        sS[r * TK + kg * 16 + lane] = ok ? s[tt][m] + mv : -INFINITY;
++                                        const bool ok = jv && c < p.ne01;
++                                        const int head = kvh * G + r % G;
++                                        float score = -INFINITY;
++                                        if (ok) {
++                                            score = s[tt][m];
++                                            if (mask_seq) {
++                                                const auto * mask_row = (const sycl::half *) (
++                                                    mask_seq + c * p.nb31 + head * p.nb32);
++                                                score += (float) mask_row[j];
++                                            }
++                                            const int distance = p.ne11 - p.ne01 + c - j;
++                                            if (p.rel && distance >= 0 && distance < p.rel_extent) {
++                                                const auto * bias = (const float *) (
++                                                    p.rel + c * p.rel_query_stride + head * p.rel_head_stride);
++                                                score += bias[distance];
++                                            }
++                                        }
++                                        sS[r * TK + kg * 16 + lane] = score;
+                                     }
+                                 }
+                             }
+@@ -583,7 +612,14 @@
+     p.K    = (const char *) K->data;
+     p.V    = (const char *) V->data;
+     p.mask = mask ? (const char *) mask->data : nullptr;
+-    p.sinks = dst->src[4] ? (const float *) dst->src[4]->data : nullptr;
++    const ggml_tensor * sinks = dst->src[4];
++    const ggml_tensor * rel = dst->op == GGML_OP_FLASH_ATTN_EXT_BANDED ? dst->src[6] : nullptr;
++    p.sinks = sinks ? (const char *) sinks->data : nullptr;
++    p.sink_query_stride = sinks && sinks->ne[1] > 1 ? sinks->nb[1] : 0;
++    p.rel = rel ? (const char *) rel->data : nullptr;
++    p.rel_extent = rel ? rel->ne[0] : 0;
++    p.rel_head_stride = rel ? rel->nb[1] : 0;
++    p.rel_query_stride = rel ? rel->nb[2] : 0;
+     p.dst  = (float *) dst->data;
+     memcpy(&p.scale, (const float *) dst->op_params + 0, sizeof(float));
+     p.G    = Q->ne[2] / K->ne[2];
+@@ -603,6 +639,7 @@
+     p.nb22 = V->nb[2];
+     p.nb23 = V->nb[3];
+     p.nb31 = mask ? mask->nb[1] : 0;
++    p.nb32 = mask && mask->ne[2] > 1 ? mask->nb[2] : 0;
+     p.nb33 = mask ? mask->nb[3] : 0;
+ 
+     // split the keys so that all work-groups run in one wave
+--- a/ggml/src/ggml-sycl/fattn.cpp
++++ b/ggml/src/ggml-sycl/fattn.cpp
+@@ -119,6 +119,12 @@
+     const ggml_tensor * V     = dst->src[2];
+     const ggml_tensor * mask  = dst->src[3];
+     const ggml_tensor * sinks = dst->src[4];
++
++    // The other SYCL kernels do not consume the banded bias or a per-head mask.
++    if (dst->op == GGML_OP_FLASH_ATTN_EXT_BANDED || (mask && mask->ne[2] > 1)) {
++        return ggml_sycl_flash_attn_ext_dpas_supported(device, dst)
++            ? BEST_FATTN_KERNEL_DPAS : BEST_FATTN_KERNEL_NONE;
++    }
+ 
+     const int gqa_ratio = Q->ne[2] / K->ne[2];
+     GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
+--- a/ggml/src/ggml-sycl/ggml-sycl.cpp
++++ b/ggml/src/ggml-sycl/ggml-sycl.cpp
+@@ -6434,6 +6434,7 @@
+             ggml_sycl_arange(ctx, dst);
+             break;
+         case GGML_OP_FLASH_ATTN_EXT:
++        case GGML_OP_FLASH_ATTN_EXT_BANDED:
+             ggml_sycl_flash_attn_ext(ctx, dst);
+             break;
+         default:
+@@ -7710,6 +7711,7 @@
+         case GGML_OP_SOLVE_TRI:
+             return op->src[0]->ne[0] <= SYCL_SOLVE_TRI_MAX_N && op->src[1]->ne[0] <= SYCL_SOLVE_TRI_MAX_K;
+         case GGML_OP_FLASH_ATTN_EXT:
++        case GGML_OP_FLASH_ATTN_EXT_BANDED:
+             // K/V row lists (ggml_flash_attn_ext_rows) are not supported
+             return op->src[5] == nullptr && ggml_sycl_flash_attn_ext_supported(device, op);
+         default:
+--- a/src/models/inkling2.cpp
++++ b/src/models/inkling2.cpp
+@@ -1,3 +1,5 @@
++#include <string_view>
++
+ #include "models.h"
+ #include "../llama-memory-hybrid-iswa.h"
+ 
+@@ -304,7 +306,7 @@
+         const auto * cache = swa ? attn->mctx->get_swa() : attn->mctx->get_base();
+         const int64_t hd = hparams.n_embd_head_k(il);
+         const auto type_ok = [](ggml_type t) {
+-            return t == GGML_TYPE_F32 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16;
++            return t == GGML_TYPE_F32 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16 || t == GGML_TYPE_Q8_0;
+         };
+         if (!(inp->n_kv_banded[swa] > 0 && (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
+                 type_ok(cache->type_k()) && type_ok(cache->type_v()) && !cache->get_k_scale(il) && !cache->get_v_scale(il) &&
+@@ -330,7 +332,11 @@
+         ggml_tensor * op = ggml_flash_attn_ext_banded(ctx0, pq, pk, pv, pm, pr, 1.0f, 1);
+         ggml_flash_attn_ext_add_sinks(op, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, nh, 1, 1));
+         ggml_prec_set_acc(op, GGML_PREC_F32);
+-        const bool ok = ggml_backend_dev_supports_op(dev, op);
++        const bool quantized = ggml_is_quantized(cache->type_k()) || ggml_is_quantized(cache->type_v());
++        // Keep the existing capability contract for other backends.
++        const auto * name = ggml_backend_dev_name(dev);
++        const bool ok = (!quantized || std::string_view(name).substr(0, 4) == "SYCL") &&
++                        ggml_backend_dev_supports_op(dev, op);
+         banded_dev_ok.push_back({ { swa, dev }, ok });
+         return ok;
+     };

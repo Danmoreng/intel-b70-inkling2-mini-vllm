@@ -1,0 +1,167 @@
+--- a/ggml/src/ggml-sycl/fattn-dpas.cpp
++++ b/ggml/src/ggml-sycl/fattn-dpas.cpp
+@@ -49,6 +49,7 @@
+     const ggml_tensor * sinks = dst->src[4];
+     const ggml_tensor * rel   = dst->src[6];
+     const bool banded = dst->op == GGML_OP_FLASH_ATTN_EXT_BANDED;
++    const ggml_tensor * q_pos = banded ? dst->src[7] : nullptr;
+ 
+     if (Q->type != GGML_TYPE_F32 || (K->type != GGML_TYPE_Q4_0 && K->type != GGML_TYPE_Q8_0) || V->type != K->type ||
+         (sinks && sinks->type != GGML_TYPE_F32)) {
+@@ -72,6 +73,9 @@
+                    rel->ne[1] != Q->ne[2] || rel->ne[2] != Q->ne[1] || rel->ne[3] != 1)) {
+         return false;
+     }
++    if (q_pos && (q_pos->type != GGML_TYPE_I32 || !ggml_is_contiguous(q_pos) || q_pos->ne[0] < Q->ne[1])) {
++        return false;
++    }
+ 
+     float max_bias      = 0.0f;
+     float logit_softcap = 0.0f;
+@@ -193,6 +197,7 @@
+     float          scale;
+     const char *   sinks;
+     const char *   rel;
++    const int32_t * q_pos;
+     int            rel_extent;
+     int64_t        sink_query_stride, rel_head_stride, rel_query_stride;
+     int            G;      // query heads per KV head
+@@ -303,7 +308,9 @@
+                 it.barrier(sycl::access::fence_space::local_space);
+ 
+                 const int    k_begin = split * p.chunk;
+-                const int    k_end   = sycl::min(k_begin + p.chunk, p.ne11);
++                const int    q_end   = sycl::min(c0 + p.nq, p.ne01);
++                const int    k_limit = p.q_pos ? sycl::min(p.ne11, p.q_pos[q_end - 1] + 1) : p.ne11;
++                const int    k_end   = sycl::min(k_begin + p.chunk, k_limit);
+                 const char * Kh      = p.K + seq * p.nb13 + kvh * p.nb12;
+                 const char * Vh      = p.V + seq * p.nb23 + kvh * p.nb22;
+                 const char * mask_seq = p.mask ? p.mask + (seq % p.ne33) * p.nb33 : nullptr;
+@@ -450,7 +457,9 @@
+                                     const int r = t * 8 + m;
+                                     const int c = c0 + r / G;
+                                     if (r < R) {
+-                                        const bool ok = jv && c < p.ne01;
++                                        const int q_position = c >= p.ne01 ? -1 :
++                                                (p.q_pos ? p.q_pos[c] : p.ne11 - p.ne01 + c);
++                                        const bool ok = jv && c < p.ne01 && (!p.q_pos || j <= q_position);
+                                         const int head = kvh * G + r % G;
+                                         float score = -INFINITY;
+                                         if (ok) {
+@@ -460,7 +469,7 @@
+                                                     mask_seq + c * p.nb31 + head * p.nb32);
+                                                 score += (float) mask_row[j];
+                                             }
+-                                            const int distance = p.ne11 - p.ne01 + c - j;
++                                            const int distance = q_position - j;
+                                             if (p.rel && distance >= 0 && distance < p.rel_extent) {
+                                                 const auto * bias = (const float *) (
+                                                     p.rel + c * p.rel_query_stride + head * p.rel_head_stride);
+@@ -617,6 +626,8 @@
+     p.sinks = sinks ? (const char *) sinks->data : nullptr;
+     p.sink_query_stride = sinks && sinks->ne[1] > 1 ? sinks->nb[1] : 0;
+     p.rel = rel ? (const char *) rel->data : nullptr;
++    const ggml_tensor * q_pos = rel ? dst->src[7] : nullptr;
++    p.q_pos = q_pos ? (const int32_t *) q_pos->data : nullptr;
+     p.rel_extent = rel ? rel->ne[0] : 0;
+     p.rel_head_stride = rel ? rel->nb[1] : 0;
+     p.rel_query_stride = rel ? rel->nb[2] : 0;
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -1535,6 +1535,9 @@
+         res &= attn_ctx->get_base()->get_n_kv_pos_contiguous() == n_kv_banded[0];
+         res &= attn_ctx->get_swa()->get_n_kv_pos_contiguous()  == n_kv_banded[1];
+     }
++    if (banded_decode_base) {
++        res &= attn_ctx->get_base()->get_n_kv_pos_contiguous() != 0;
++    }
+ 
+     res &= inp_rs->s_copy->ne[0] == mctx->get_recr()->get_n_rs();
+ 
+--- a/src/llama-graph.h
++++ b/src/llama-graph.h
+@@ -825,6 +825,7 @@
+     // [base, swa] K/V cells of the banded attention, 0 = dense
+     uint32_t n_kv_banded[2] = { 0, 0 };
+     bool     banded         = false;
++    bool     banded_decode_base = false; // contiguous global pages, query positions supplied to the kernel
+ 
+     const uint32_t extent;
+     const uint32_t extent_swa;
+--- a/src/models/inkling2.cpp
++++ b/src/models/inkling2.cpp
+@@ -4,6 +4,7 @@
+ #include "../llama-memory-hybrid-iswa.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <vector>
+ 
+ // max elements of the dense relative bias per attention call, and max chunks per layer
+@@ -301,14 +302,20 @@
+     for (int i = 0; i < 2 && inp->banded; ++i) {
+         inp->n_kv_banded[i] = (i ? attn->mctx->get_swa() : attn->mctx->get_base())->get_n_kv_pos_contiguous();
+     }
++    const auto * banded_decode = std::getenv("LLAMA_INKLING_BANDED_DECODE");
++    const auto * base_cache = attn->mctx->get_base();
++    inp->banded_decode_base = banded_decode && std::atoi(banded_decode) != 0 && !inp->banded &&
++            cparams.flash_attn && cparams.causal_attn && base_cache->type_k() == GGML_TYPE_Q8_0 &&
++            base_cache->type_v() == GGML_TYPE_Q8_0 && base_cache->get_n_kv_pos_contiguous() != 0;
+     std::vector<std::pair<std::pair<bool, ggml_backend_dev_t>, bool>> banded_dev_ok;
+     const auto use_banded = [&](int il, bool swa) {
+         const auto * cache = swa ? attn->mctx->get_swa() : attn->mctx->get_base();
++        const bool decode = !swa && inp->banded_decode_base;
+         const int64_t hd = hparams.n_embd_head_k(il);
+         const auto type_ok = [](ggml_type t) {
+             return t == GGML_TYPE_F32 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16 || t == GGML_TYPE_Q8_0;
+         };
+-        if (!(inp->n_kv_banded[swa] > 0 && (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
++        if (!((decode || inp->n_kv_banded[swa] > 0) && (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
+                 type_ok(cache->type_k()) && type_ok(cache->type_v()) && !cache->get_k_scale(il) && !cache->get_v_scale(il) &&
+                 (swa ? attn->self_attn_mask_swa.raw : attn->self_attn_mask.raw)->ne[3] == 1)) {
+             return false;
+@@ -335,7 +342,7 @@
+         const bool quantized = ggml_is_quantized(cache->type_k()) || ggml_is_quantized(cache->type_v());
+         // Keep the existing capability contract for other backends.
+         const auto * name = ggml_backend_dev_name(dev);
+-        const bool ok = (!quantized || std::string_view(name).substr(0, 4) == "SYCL") &&
++        const bool ok = (!(quantized || decode) || std::string_view(name).substr(0, 4) == "SYCL") &&
+                         ggml_backend_dev_supports_op(dev, op);
+         banded_dev_ok.push_back({ { swa, dev }, ok });
+         return ok;
+@@ -482,6 +489,7 @@
+ 
+             if (use_banded(il, is_swa)) {
+                 const auto * cache = is_swa ? attn->mctx->get_swa() : attn->mctx->get_base();
++                const bool decode = !is_swa && inp->banded_decode_base;
+                 auto * k_rot = is_swa ? attn->self_k_rot_swa[il] : attn->self_k_rot[il];
+                 auto * v_rot = is_swa ? attn->self_v_rot_swa[il] : attn->self_v_rot[il];
+                 if (k_rot) {
+@@ -497,7 +505,7 @@
+                 ggml_build_forward_expand(gf, cache->cpy_k(ctx0, Kcur, is_swa ? attn->get_k_idxs_swa() : attn->get_k_idxs(), il));
+                 ggml_build_forward_expand(gf, cache->cpy_v(ctx0, Vcur, is_swa ? attn->get_v_idxs_swa() : attn->get_v_idxs(), il));
+ 
+-                const int64_t n_kv_b = inp->n_kv_banded[is_swa];
++                const int64_t n_kv_b = decode ? cache->get_n_kv() : inp->n_kv_banded[is_swa];
+                 ggml_tensor * k_all = cache->get_k(ctx0, il);
+                 ggml_tensor * v_all = cache->get_v(ctx0, il);
+                 GGML_ASSERT(n_kv_b <= k_all->ne[2]);
+@@ -514,12 +522,17 @@
+                             v_all->nb[1], v_all->nb[2], v_all->nb[3], 0), 0, 2, 1, 3);
+                 }
+                 ggml_tensor * mask = is_swa ? attn->self_attn_mask_swa.raw : attn->self_attn_mask.raw;
+-                ggml_tensor * m = ggml_cont(ctx0, ggml_view_4d(ctx0, mask, n_kv_b, mask->ne[1], mask->ne[2], mask->ne[3],
++                ggml_tensor * m = decode ? nullptr : ggml_cont(ctx0, ggml_view_4d(ctx0, mask, n_kv_b, mask->ne[1], mask->ne[2], mask->ne[3],
+                         mask->nb[1], mask->nb[2], mask->nb[3], 0));
+                 // exp(s + b)/(exp(t) + sum(exp(s + b))): the dense mask b - t with a zero sink
+                 ggml_tensor * rel_b = ggml_mul_mat(ctx0, layer.attn_rel_bias, Rcur);
+                 rel_b = ggml_reshape_4d(ctx0, rel_b, rel_b->ne[0], n_head, n_tokens, 1);
+                 cur = ggml_flash_attn_ext_banded(ctx0, q_fa, k_fa, v_fa, m, rel_b, 1.0f/sqrtf(n_embd_head), rel_b->ne[0]);
++                if (decode) {
++                    // Physical key row i has absolute position i in this regime.
++                    // Keep the graph at padded KV width and read the actual positions on device.
++                    cur->src[7] = inp_pos;
++                }
+                 ggml_flash_attn_ext_add_sinks(cur, ggml_reshape_3d(ctx0, sinks, n_head, n_tokens, 1));
+                 ggml_prec_set_acc(cur, GGML_PREC_F32);
+                 res->add_fused_node({LLM_FUSED_OP_FLASH_ATTN, cur, il});

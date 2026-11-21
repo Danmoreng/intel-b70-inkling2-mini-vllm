@@ -1,0 +1,199 @@
+diff --git a/xpu/exl3xpu/inkling2/sgl_model.py b/xpu/exl3xpu/inkling2/sgl_model.py
+index 9eb7429..70c9983 100644
+--- a/xpu/exl3xpu/inkling2/sgl_model.py
++++ b/xpu/exl3xpu/inkling2/sgl_model.py
+@@ -75,7 +75,7 @@ class _LMHead(nn.Module):
+ 
+ 
+ class Inkling2LoopForConditionalGeneration(nn.Module):
+-    def __init__(self, config, quant_config=None, prefix: str = ""):
++    def __init__(self, config, quant_config=None, prefix: str = "", *, external_slots=None):
+         super().__init__()
+         self.config = config
+         tc = config.inkling_text
+@@ -108,16 +108,18 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         self.lin: dict[str, Q8Linear] = {}
+         self.experts: dict[int, Inkling2ExpertsSYCL] = {}
+         self.lm_head = _LMHead()
+-        from sglang.srt.layers.logits_processor import LogitsProcessor
+-        self.logits_processor = LogitsProcessor(config)
+-        n_slots = os.environ.get("INKLING2_SLOTS")
++        n_slots = external_slots
+         if n_slots is None:
+-            try:
+-                from sglang.srt.runtime_context import get_server_args
+-                mrr = get_server_args().max_running_requests
+-                n_slots = (int(mrr) + 2) if mrr else 8
+-            except Exception:
+-                n_slots = 8
++            from sglang.srt.layers.logits_processor import LogitsProcessor
++            self.logits_processor = LogitsProcessor(config)
++            n_slots = os.environ.get("INKLING2_SLOTS")
++            if n_slots is None:
++                try:
++                    from sglang.srt.runtime_context import get_server_args
++                    mrr = get_server_args().max_running_requests
++                    n_slots = (int(mrr) + 2) if mrr else 8
++                except Exception:
++                    n_slots = 8
+         self.n_slots = int(n_slots)
+         self._dummy = nn.Parameter(torch.zeros(1), requires_grad=False)   # gives the module a device
+         self.visual = None
+@@ -127,7 +129,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         self.start_layer, self.end_layer = 0, self.n_global
+ 
+     # ------------------------------------------------------------------------------------------------------------
+-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
++    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]], *, experts=None):
+         dev = torch.device("xpu", torch.xpu.current_device())
+         raw = {}
+         vis_params = dict(self.visual.named_parameters()) if self.visual is not None else {}
+@@ -152,16 +154,19 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             if k in ("embed.weight", "unembed.weight"):
+                 t = t[: self.vocab]
+             self.w[k] = t.to(dev)
+-        for il in range(self.n_layers):
+-            e = f"layers.{il}.mlp.experts."
+-            if e + "w13_weight_amax" in raw:
+-                a13 = (raw[e + "w13_weight_amax"] / raw[e + "w13_weight_outer_scale_denominator"]).to(dev)
+-                a2 = (raw[e + "w2_weight_amax"] / raw[e + "w2_weight_outer_scale_denominator"]).to(dev)
+-            else:
+-                a13 = a2 = None
+-            self.experts[il] = Inkling2ExpertsSYCL(raw[e + "w13_weight"].to(dev), raw[e + "w13_weight_scale"].to(dev),
+-                                                   raw[e + "w2_weight"].to(dev), raw[e + "w2_weight_scale"].to(dev), a13, a2,
+-                                                   self.tc["mlp_gate_softcap"], self.tc["mlp_up_softcap"])
++        if experts is not None:
++            self.experts = experts
++        else:
++            for il in range(self.n_layers):
++                e = f"layers.{il}.mlp.experts."
++                if e + "w13_weight_amax" in raw:
++                    a13 = (raw[e + "w13_weight_amax"] / raw[e + "w13_weight_outer_scale_denominator"]).to(dev)
++                    a2 = (raw[e + "w2_weight_amax"] / raw[e + "w2_weight_outer_scale_denominator"]).to(dev)
++                else:
++                    a13 = a2 = None
++                self.experts[il] = Inkling2ExpertsSYCL(raw[e + "w13_weight"].to(dev), raw[e + "w13_weight_scale"].to(dev),
++                                                       raw[e + "w2_weight"].to(dev), raw[e + "w2_weight_scale"].to(dev), a13, a2,
++                                                       self.tc["mlp_gate_softcap"], self.tc["mlp_up_softcap"])
+         del raw
+         if self.visual is not None:
+             self.visual.to(dev)
+@@ -328,6 +333,27 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+         o = torch.cat(out)
+         return (x.float() + o) / math.sqrt((2 if dynamic is not None else 1) * N_CONV + 1)
+ 
++    def _decode_global(self, visit, q, k, v, pos, rel, proj, sink, fb):
++        gi = self.visit_slot[visit]
++        pool = self._kv_pool
++        pool.set_kv_buffer(None, fb.out_cache_loc, k, v, layer_id_override=gi)
++        kp, vp = pool.get_key_buffer(gi), pool.get_value_buffer(gi)
++        return attention_decode(q, kp, vp, self._st_req_slots, pos.int(), rel, proj, sink, n_q=self._st_nq,
++                                paged=True, r2t=self._r2t, kv_len=self._st_kvlen, nsplit=NSPLIT_G)
++
++    def _prefill_global(self, visit, q, k, v, table, sink, reqs, fb):
++        gi = self.visit_slot[visit]
++        pool = self._kv_pool
++        pool.set_kv_buffer(None, fb.out_cache_loc, k, v, layer_id_override=gi)
++        kp, vp = pool.get_key_buffer(gi), pool.get_value_buffer(gi)
++        outs = []
++        for (s, r0, n, p0) in reqs:
++            loc = self._r2t_ext[s, :p0 + n]
++            ks, vs = gather_f16(kp, loc), gather_f16(vp, loc)
++            outs.append(attention_prefill_esimd(q[r0:r0 + n], ks, vs, p0, 0, table[r0:r0 + n], sink[r0:r0 + n],
++                                                window=0, qtw=PREFILL_QTW))
++        return outs
++
+     def _attention(self, il, vi, inq, ink, inv, pos, reqs, fb, glob):
+         p = f"layers.{il}.attn."
+         T = inq.shape[0]
+@@ -360,12 +386,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
+                                      ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
+             else:
+-                gi = self.visit_slot[vi]
+-                pool = self._kv_pool
+-                pool.set_kv_buffer(None, fb.out_cache_loc, kb16, vb16, layer_id_override=gi)
+-                kp, vp = pool.get_key_buffer(gi), pool.get_value_buffer(gi)
+-                o = attention_decode(q, kp, vp, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=True,
+-                                     r2t=self._r2t, kv_len=self._st_kvlen, nsplit=NSPLIT_G)
++                o = self._decode_global(vi, q, kb16, vb16, pos, r, proj, sink, fb)
+             o = o.reshape(T, self.H * self.hd) * gate_s
+             o = self.L(p + "wo_ud.weight", o)
+             return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
+@@ -392,12 +413,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=False,
+                                      ring_pos=self.swa_pos, ring=RING, window=self.window, nsplit=NSPLIT_SWA)
+             else:
+-                gi = self.visit_slot[vi]
+-                pool = self._kv_pool
+-                pool.set_kv_buffer(None, fb.out_cache_loc, k.to(torch.bfloat16), v.to(torch.bfloat16), layer_id_override=gi)
+-                kb, vb = pool.get_key_buffer(gi), pool.get_value_buffer(gi)
+-                o = attention_decode(q, kb, vb, self._st_req_slots, pos.int(), r, proj, sink, n_q=self._st_nq, paged=True,
+-                                     r2t=self._r2t, kv_len=self._st_kvlen, nsplit=NSPLIT_G)
++                o = self._decode_global(vi, q, k.to(torch.bfloat16), v.to(torch.bfloat16), pos, r, proj, sink, fb)
+             o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
+             o = self.L(p + "wo_ud.weight", o)
+             return self._conv(vi, "attn_out", o, self.f32[f"layers.{il}.attn_sconv.weight"], None, reqs, pos)
+@@ -417,16 +433,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             kb[self._ring_rows] = k[self._ring_src].to(torch.bfloat16)
+             vb[self._ring_rows] = v[self._ring_src].to(torch.bfloat16)
+         else:
+-            gi = self.visit_slot[vi]
+-            pool = self._kv_pool
+-            pool.set_kv_buffer(None, fb.out_cache_loc, k.to(torch.bfloat16), v.to(torch.bfloat16), layer_id_override=gi)
+-            kp, vp = pool.get_key_buffer(gi), pool.get_value_buffer(gi)
+-            for (s, r0, n, p0) in reqs:
+-                loc = self._r2t_ext[s, :p0 + n]
+-                ks, vs = gather_f16(kp, loc), gather_f16(vp, loc)       # fp16 straight from the paged fp8 pool
+-                outs.append(attention_prefill_esimd(q[r0:r0 + n], ks, vs, p0, 0, table[r0:r0 + n], sink[r0:r0 + n],
+-                                                    window=0, qtw=PREFILL_QTW))
+-                del ks, vs
++            outs = self._prefill_global(vi, q, k.to(torch.bfloat16), v.to(torch.bfloat16), table, sink, reqs, fb)
+         o = torch.cat(outs) if len(outs) > 1 else outs[0]
+         o = o.reshape(T, self.H * self.hd) * torch.sigmoid(gate)
+         o = self.L(p + "wo_ud.weight", o)
+@@ -450,7 +457,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             topi, topw = froute(logits, self.f32[p + "gate.bias"], self.tc["num_experts_per_tok"], self.tc["route_scale"])
+         return self.experts[il](x, topi, topw)
+ 
+-    def _prepare(self, fb, reqs, pos):
++    def _prepare(self, fb, reqs, pos, *, kv_pool=None, req_to_token=None):
+         dev = pos.device
+         # new requests: invalidate their rings
+         for (s, r0, n, p0) in reqs:
+@@ -458,11 +465,12 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 self.swa_pos[s].fill_(-1)
+                 self.conv_pos[s].fill_(-1)
+         # global: paged keys 0 .. p0+n-1 of each request
+-        from sglang.srt.model_executor.forward_context import get_attn_backend
+-        be = get_attn_backend()
+-        self._kv_pool = be.token_to_kv_pool
+-        r2t = be.req_to_token
+-        self._r2t_ext = r2t
++        if kv_pool is None:
++            from sglang.srt.model_executor.forward_context import get_attn_backend
++            backend = get_attn_backend()
++            kv_pool, req_to_token = backend.token_to_kv_pool, backend.req_to_token
++        self._kv_pool = kv_pool
++        self._r2t_ext = req_to_token
+         locs, starts, kp = [], [0], []
+         if True:
+             self._g_loc = self._g_kpos = self._g_start = None
+@@ -582,7 +590,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+             self._idx_cache[key] = t
+         return t
+ 
+-    def _forward_body(self, input_ids, positions, fb, reqs, input_embeds=None):
++    def _forward_body(self, input_ids, positions, fb, reqs, input_embeds=None, *, return_hidden=False):
+         pos = positions.long()
+         T = input_ids.shape[0]
+         extend_scratch = None if self._static else self._swa_scratch
+@@ -657,7 +665,7 @@ class Inkling2LoopForConditionalGeneration(nn.Module):
+                 self.swa_pos[s, pp.remainder(RING)] = pp.int()
+         h = fmix(bbuf, self._idx(blocks), cur, self.w["attn_res.output_query"].view(1, -1),
+                  self.w["norm.weight"].float().view(1, -1))[0].to(torch.bfloat16)
+-        return self.logits_processor(input_ids, h, self.lm_head, fb)
++        return h if return_hidden else self.logits_processor(input_ids, h, self.lm_head, fb)
+ 
+ 
+ EntryClass = Inkling2LoopForConditionalGeneration

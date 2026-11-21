@@ -1,0 +1,153 @@
+diff --git a/xpu/csrc/inkling2_ops.sycl b/xpu/csrc/inkling2_ops.sycl
+index 9dcffac..bc34ca5 100644
+--- a/xpu/csrc/inkling2_ops.sycl
++++ b/xpu/csrc/inkling2_ops.sycl
+@@ -343,13 +343,14 @@ void dequant(at::Tensor W, at::Tensor S, std::optional<at::Tensor> alpha, at::Te
+ // One sub-group per (request b, kv head hk, split sp). Rows = G query heads x NQ query rows of the request.
+ // Phase 1 (lanes own keys): s[r] = scale * q_r . k_key + bias (table[row, h, dist] if dist < E), masked; online softmax.
+ // Phase 2 (lanes own 8 head dims): acc[r][8] += p[r][key] * v[key][lane dims] (p broadcast within the sub-group).
+-// Keys: PAGED -> pool row r2t[slot][j], position j, j < kvlen[b];  RING -> row slot*ring + j, position ring_pos[slot][j].
++// Keys: paged uses either physical token rows or physical KV blocks; ring positions are explicit.
+ // Out: acc [T][H][NSPLIT][D], m/l [T][H][NSPLIT]; the sink logit enters split 0 as the initial (m, l) = (sink, 1).
+ template <int NQ, bool FP8, bool PAGED>
+ static void dec_attn_impl(sycl::queue& q, const bf16* Q, const uint8_t* K, const uint8_t* V, const int* slots, const int* kvlen,
+                           const int* r2t, const int* rpos, const int* qpos_all, const float* rrel, const float* proj, const float* sink,
+                           float* oacc, float* om, float* ol, int bs, int H, int Hkv, int nsplit, int ring, int window,
+-                          int E, int64_t sq_t, int64_t sq_h, int64_t sk_t, int64_t sk_h, int64_t sv_t, int64_t sv_h,
++                          int E, int page_size, int64_t sk_b, int64_t sv_b,
++                          int64_t sq_t, int64_t sq_h, int64_t sk_t, int64_t sk_h, int64_t sv_t, int64_t sv_h,
+                           int64_t s_r2t, int64_t sr_t, int64_t sr_h, int64_t ss_t, int64_t ss_h, float scale, float kscale, float vscale) {
+     constexpr int D = 128, DL = D / SG, G = 3, R = G * NQ;
+     constexpr float NEG = -1e30f;
+@@ -390,16 +391,26 @@ static void dec_attn_impl(sycl::queue& q, const bf16* Q, const uint8_t* K, const
+             for (int start = lo; start < hi; start += SG) {
+                 const int key = start + lane;
+                 const bool kin = key < hi;
+-                int64_t loc = 0; int kpos = -1;
++                int64_t key_offset = 0, value_offset = 0;
++                int kpos = -1;
+                 if (kin) {
+-                    loc = PAGED ? (int64_t)r2t[slot * s_r2t + key] : slot * ring + key;
++                    if (PAGED && page_size > 0) {
++                        const int64_t block = r2t[slot * s_r2t + key / page_size];
++                        const int token = key % page_size;
++                        key_offset = block * sk_b + token * sk_t;
++                        value_offset = block * sv_b + token * sv_t;
++                    } else {
++                        const int64_t loc = PAGED ? r2t[slot * s_r2t + key] : slot * ring + key;
++                        key_offset = loc * sk_t;
++                        value_offset = loc * sv_t;
++                    }
+                     kpos = PAGED ? key : rpos[slot * ring + key];
+                 }
+                 float s[R];
+ #pragma unroll
+                 for (int r = 0; r < R; ++r) s[r] = 0.f;
+                 if (kin && kpos >= 0) {
+-                    const uint8_t* kr = K + (loc * sk_t + hk * sk_h) * esz;
++                    const uint8_t* kr = K + (key_offset + hk * sk_h) * esz;
+ #pragma unroll
+                     for (int c = 0; c < D; c += 16) {
+                         float kv[16];
+@@ -448,8 +459,8 @@ static void dec_attn_impl(sycl::queue& q, const bf16* Q, const uint8_t* K, const
+                 }
+                 const int nk = sycl::min(SG, hi - start);
+                 for (int kk = 0; kk < nk; ++kk) {
+-                    const int64_t lk = sycl::group_broadcast(sg, loc, kk);
+-                    const uint8_t* vr = V + (lk * sv_t + hk * sv_h) * esz;
++                    const int64_t offset = sycl::group_broadcast(sg, value_offset, kk);
++                    const uint8_t* vr = V + (offset + hk * sv_h) * esz;
+                     float vv[DL];
+                     if (FP8) {
+                         const sycl::vec<uint8_t, 8> b8 = *reinterpret_cast<const sycl::vec<uint8_t, 8>*>(vr + lane * DL);
+@@ -485,17 +496,31 @@ void decode_attn(at::Tensor Q, at::Tensor K, at::Tensor V, at::Tensor slots, std
+                  at::Tensor oacc, at::Tensor om, at::Tensor ol, int64_t nq, int64_t ring, int64_t window, double kscale, double vscale) {
+     TORCH_CHECK(Q.scalar_type() == at::kBFloat16 && rrel.scalar_type() == at::kFloat && proj.scalar_type() == at::kFloat && sink.scalar_type() == at::kFloat);
+     TORCH_CHECK(rrel.size(2) == 16 && proj.size(0) == 16 && rrel.stride(2) == 1 && proj.is_contiguous());
+-    TORCH_CHECK(Q.size(2) == 128 && Q.size(1) == 3 * K.size(1), "head_dim 128, GQA 3");
+-    const bool fp8 = K.element_size() == 1, paged = r2t.has_value();
++    const bool paged = r2t.has_value(), block_layout = K.dim() == 4;
++    const int head_axis = block_layout ? 2 : 1;
++    const int token_axis = block_layout ? 1 : 0;
++    TORCH_CHECK(paged || !block_layout, "block layout requires a block table");
++    TORCH_CHECK((K.dim() == 3 || block_layout) && K.sizes() == V.sizes());
++    TORCH_CHECK(K.scalar_type() == V.scalar_type() &&
++                (K.scalar_type() == at::kBFloat16 || K.scalar_type() == at::kFloat8_e4m3fn));
++    TORCH_CHECK(Q.size(2) == 128 && K.size(-1) == 128 && Q.size(1) == 3 * K.size(head_axis),
++                "head_dim 128, GQA 3");
++    TORCH_CHECK(Q.stride(2) == 1 && K.stride(-1) == 1 && V.stride(-1) == 1);
++    TORCH_CHECK(!paged || (kvlen && r2t->stride(1) == 1));
++    TORCH_CHECK(paged || rpos.has_value());
++    const bool fp8 = K.scalar_type() == at::kFloat8_e4m3fn;
++    const int page_size = block_layout ? K.size(1) : 0;
++    TORCH_CHECK(!block_layout || page_size > 0);
+     auto& q = queue_of(Q);
+-    const int bs = slots.size(0), H = Q.size(1), Hkv = K.size(1), nsplit = oacc.size(2), E = proj.size(1);
++    const int bs = slots.size(0), H = Q.size(1), Hkv = K.size(head_axis), nsplit = oacc.size(2), E = proj.size(1);
+     const float scale = 1.0f / sycl::sqrt(128.0f);
+     const auto* Kp = reinterpret_cast<const uint8_t*>(K.data_ptr());
+     const auto* Vp = reinterpret_cast<const uint8_t*>(V.data_ptr());
+ #define DA(NQV, F8, PG) dec_attn_impl<NQV, F8, PG>(q, reinterpret_cast<const bf16*>(Q.data_ptr()), Kp, Vp, slots.data_ptr<int>(), \
+         PG ? kvlen->data_ptr<int>() : nullptr, PG ? r2t->data_ptr<int>() : nullptr, PG ? nullptr : rpos->data_ptr<int>(), qpos.data_ptr<int>(), \
+         rrel.data_ptr<float>(), proj.data_ptr<float>(), sink.data_ptr<float>(), oacc.data_ptr<float>(), om.data_ptr<float>(), ol.data_ptr<float>(), \
+-        bs, H, Hkv, nsplit, (int)ring, (int)window, E, Q.stride(0), Q.stride(1), K.stride(0), K.stride(1), V.stride(0), V.stride(1), \
++        bs, H, Hkv, nsplit, (int)ring, (int)window, E, page_size, K.stride(0), V.stride(0), \
++        Q.stride(0), Q.stride(1), K.stride(token_axis), K.stride(head_axis), V.stride(token_axis), V.stride(head_axis), \
+         PG ? r2t->stride(0) : 0, rrel.stride(0), rrel.stride(1), sink.stride(0), sink.stride(1), scale, (float)kscale, (float)vscale)
+ #define DA_NQ(F8, PG) if (nq == 1) DA(1, F8, PG); else if (nq == 2) DA(2, F8, PG); else if (nq <= 4) DA(4, F8, PG); else DA(8, F8, PG)
+     TORCH_CHECK(nq == 1 || nq == 2 || nq == 4 || nq == 8, "nq in {1,2,4,8}");
+@@ -519,7 +544,7 @@ constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+ 
+ template <int D>
+ struct Kern {
+-    const fp16* q; const fp16* k; const fp16* v; float* o;
++    const fp16* q; const fp16* k; const fp16* v; float* o; float* lse;
+     const uint16_t* table; const float* sink;
+     int Lq, Lk, Hq, Hk, G, qpos0, kpos0, window, E, QTW;
+     float scale_log2;
+@@ -640,6 +665,8 @@ struct Kern {
+         simd<float, QR> inv;
+ #pragma unroll
+         for (int r = 0; r < QR; ++r) { float lr = l[r]; inv[r] = lr > 0.f ? 1.0f / lr : 0.f; }
++        simd<float, QR> normalizer;
++        if (lse) normalizer = (m + log2(l)) / LOG2E;
+ #pragma unroll
+         for (int r = 0; r < QR; ++r) {
+             if (q0 + r >= Lq) break;
+@@ -647,20 +674,24 @@ struct Kern {
+             const float ir = inv[r];
+ #pragma unroll
+             for (int c = 0; c < NC; ++c) row.template select<16, 1>(c * 16) = simd<float, 16>(O.template select<16, 1>((c * QR + r) * 16)) * ir;
+-            block_store<float, D>(o + ((size_t)(q0 + r) * Hq + h) * D, row);
++            const size_t row_index = (size_t)(q0 + r) * Hq + h;
++            block_store<float, D>(o + row_index * D, row);
++            if (lse) lse[row_index] = normalizer[r];
+         }
+     }
+ };
+ }  // namespace fa
+ 
+ void prefill_attn(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o, std::optional<at::Tensor> table, std::optional<at::Tensor> sink,
+-                  int64_t qpos0, int64_t kpos0, int64_t window, int64_t qtw) {
++                  int64_t qpos0, int64_t kpos0, int64_t window, int64_t qtw, std::optional<at::Tensor> lse) {
+     TORCH_CHECK(q.scalar_type() == at::kHalf && k.scalar_type() == at::kHalf && v.scalar_type() == at::kHalf && o.scalar_type() == at::kFloat);
+     TORCH_CHECK(q.is_contiguous() && k.is_contiguous() && v.is_contiguous() && o.is_contiguous() && q.size(2) == 128);
+     const int Lq = q.size(0), Hq = q.size(1), Lk = k.size(0), Hk = k.size(1);
++    TORCH_CHECK(!lse || (lse->device() == q.device() && lse->scalar_type() == at::kFloat &&
++                        lse->is_contiguous() && lse->dim() == 2 && lse->size(0) == Lq && lse->size(1) == Hq));
+     auto& qu = queue_of(q);
+     fa::Kern<128> kern{reinterpret_cast<const sycl::half*>(q.data_ptr()), reinterpret_cast<const sycl::half*>(k.data_ptr()),
+-                       reinterpret_cast<const sycl::half*>(v.data_ptr()), o.data_ptr<float>(),
++                       reinterpret_cast<const sycl::half*>(v.data_ptr()), o.data_ptr<float>(), lse ? lse->data_ptr<float>() : nullptr,
+                        table ? reinterpret_cast<const uint16_t*>(table->data_ptr()) : nullptr, sink ? sink->data_ptr<float>() : nullptr,
+                        Lq, Lk, Hq, Hk, Hq / Hk, (int)qpos0, (int)kpos0, (int)window, table ? (int)table->size(2) : 0, (int)qtw,
+                        (float)(fa::LOG2E / sycl::sqrt(128.0))};
+@@ -680,7 +711,7 @@ TORCH_LIBRARY(inkling2_xpu, m) {
+     m.impl("decode_attn", torch::kXPU, &inkling2::decode_attn);
+     m.def("moe_gemv2(Tensor A, Tensor W, Tensor S, Tensor? alpha, Tensor(a!) out, Tensor sorted, Tensor eob, Tensor? topw, int n_pairs, int a_row_div, int mb, int variant, int rps, int situ=0, float gcap=4.0, float ucap=25.0, Tensor(b!)? act_out=None) -> ()");
+     m.impl("moe_gemv2", torch::kXPU, &inkling2::moe_gemv2);
+-    m.def("prefill_attn(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor? table, Tensor? sink, int qpos0, int kpos0, int window, int qtw=1) -> ()");
++    m.def("prefill_attn(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor? table, Tensor? sink, int qpos0, int kpos0, int window, int qtw=1, Tensor(b!)? lse=None) -> ()");
+     m.impl("prefill_attn", torch::kXPU, &inkling2::prefill_attn);
+     m.def("dequant(Tensor W, Tensor S, Tensor? alpha, Tensor ids, Tensor(a!) out) -> ()");
+     m.impl("dequant", torch::kXPU, &inkling2::dequant);

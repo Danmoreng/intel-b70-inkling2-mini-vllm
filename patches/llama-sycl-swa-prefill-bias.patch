@@ -1,0 +1,100 @@
+--- a/ggml/src/ggml-sycl/fattn-dpas.cpp
++++ b/ggml/src/ggml-sycl/fattn-dpas.cpp
+@@ -50,6 +50,7 @@
+     const ggml_tensor * rel   = dst->src[6];
+     const bool banded = dst->op == GGML_OP_FLASH_ATTN_EXT_BANDED;
+     const ggml_tensor * q_pos = banded ? dst->src[7] : nullptr;
++    const ggml_tensor * rel_indices = banded ? dst->src[8] : nullptr;
+ 
+     if (Q->type != GGML_TYPE_F32 || (K->type != GGML_TYPE_Q4_0 && K->type != GGML_TYPE_Q8_0) || V->type != K->type ||
+         (sinks && sinks->type != GGML_TYPE_F32)) {
+@@ -76,6 +77,10 @@
+     if (q_pos && (q_pos->type != GGML_TYPE_I32 || !ggml_is_contiguous(q_pos) || q_pos->ne[0] < Q->ne[1])) {
+         return false;
+     }
++    if (rel_indices && (rel_indices->type != GGML_TYPE_I32 || !ggml_is_contiguous(rel_indices) ||
++                        rel_indices->ne[0] != K->ne[1] || rel_indices->ne[1] != Q->ne[1])) {
++        return false;
++    }
+ 
+     float max_bias      = 0.0f;
+     float logit_softcap = 0.0f;
+@@ -198,6 +203,7 @@
+     const char *   sinks;
+     const char *   rel;
+     const int32_t * q_pos;
++    const int32_t * rel_indices;
+     int            rel_extent;
+     int64_t        sink_query_stride, rel_head_stride, rel_query_stride;
+     int            G;      // query heads per KV head
+@@ -469,7 +475,8 @@
+                                                     mask_seq + c * p.nb31 + head * p.nb32);
+                                                 score += (float) mask_row[j];
+                                             }
+-                                            const int distance = q_position - j;
++                                            const int distance = p.rel_indices ? p.rel_indices[(int64_t) c * p.ne11 + j] :
++                                                                                 q_position - j;
+                                             if (p.rel && distance >= 0 && distance < p.rel_extent) {
+                                                 const auto * bias = (const float *) (
+                                                     p.rel + c * p.rel_query_stride + head * p.rel_head_stride);
+@@ -628,6 +635,8 @@
+     p.rel = rel ? (const char *) rel->data : nullptr;
+     const ggml_tensor * q_pos = rel ? dst->src[7] : nullptr;
+     p.q_pos = q_pos ? (const int32_t *) q_pos->data : nullptr;
++    const ggml_tensor * rel_indices = rel ? dst->src[8] : nullptr;
++    p.rel_indices = rel_indices ? (const int32_t *) rel_indices->data : nullptr;
+     p.rel_extent = rel ? rel->ne[0] : 0;
+     p.rel_head_stride = rel ? rel->nb[1] : 0;
+     p.rel_query_stride = rel ? rel->nb[2] : 0;
+--- a/src/models/inkling2.cpp
++++ b/src/models/inkling2.cpp
+@@ -303,6 +303,10 @@
+         inp->n_kv_banded[i] = (i ? attn->mctx->get_swa() : attn->mctx->get_base())->get_n_kv_pos_contiguous();
+     }
+     const auto * banded_decode = std::getenv("LLAMA_INKLING_BANDED_DECODE");
++    const auto * swa_bias = std::getenv("LLAMA_INKLING_SYCL_SWA_BIAS");
++    const auto * swa_cache = attn->mctx->get_swa();
++    const bool indexed_swa = cparams.flash_attn && swa_bias && std::atoi(swa_bias) != 0 &&
++            swa_cache->type_k() == GGML_TYPE_Q8_0 && swa_cache->type_v() == GGML_TYPE_Q8_0;
+     const auto * base_cache = attn->mctx->get_base();
+     inp->banded_decode_base = banded_decode && std::atoi(banded_decode) != 0 && !inp->banded &&
+             cparams.flash_attn && cparams.causal_attn && base_cache->type_k() == GGML_TYPE_Q8_0 &&
+@@ -315,7 +319,8 @@
+         const auto type_ok = [](ggml_type t) {
+             return t == GGML_TYPE_F32 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16 || t == GGML_TYPE_Q8_0;
+         };
+-        if (!((decode || inp->n_kv_banded[swa] > 0) && (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
++        if (!((decode || (swa && indexed_swa) || inp->n_kv_banded[swa] > 0) &&
++                (hd == 64 || hd == 128) && hparams.n_embd_head_v(il) == hd &&
+                 type_ok(cache->type_k()) && type_ok(cache->type_v()) && !cache->get_k_scale(il) && !cache->get_v_scale(il) &&
+                 (swa ? attn->self_attn_mask_swa.raw : attn->self_attn_mask.raw)->ne[3] == 1)) {
+             return false;
+@@ -490,6 +495,7 @@
+             if (use_banded(il, is_swa)) {
+                 const auto * cache = is_swa ? attn->mctx->get_swa() : attn->mctx->get_base();
+                 const bool decode = !is_swa && inp->banded_decode_base;
++                const bool indexed = is_swa && indexed_swa;
+                 auto * k_rot = is_swa ? attn->self_k_rot_swa[il] : attn->self_k_rot[il];
+                 auto * v_rot = is_swa ? attn->self_v_rot_swa[il] : attn->self_v_rot[il];
+                 if (k_rot) {
+@@ -505,7 +511,7 @@
+                 ggml_build_forward_expand(gf, cache->cpy_k(ctx0, Kcur, is_swa ? attn->get_k_idxs_swa() : attn->get_k_idxs(), il));
+                 ggml_build_forward_expand(gf, cache->cpy_v(ctx0, Vcur, is_swa ? attn->get_v_idxs_swa() : attn->get_v_idxs(), il));
+ 
+-                const int64_t n_kv_b = decode ? cache->get_n_kv() : inp->n_kv_banded[is_swa];
++                const int64_t n_kv_b = decode || indexed ? cache->get_n_kv() : inp->n_kv_banded[is_swa];
+                 ggml_tensor * k_all = cache->get_k(ctx0, il);
+                 ggml_tensor * v_all = cache->get_v(ctx0, il);
+                 GGML_ASSERT(n_kv_b <= k_all->ne[2]);
+@@ -533,6 +539,11 @@
+                     // Keep the graph at padded KV width and read the actual positions on device.
+                     cur->src[7] = inp_pos;
+                 }
++                if (indexed) {
++                    // A sliding-window cache may wrap. Read the logical distance
++                    // from each physical key row without expanding it per head.
++                    cur->src[8] = rel_pos;
++                }
+                 ggml_flash_attn_ext_add_sinks(cur, ggml_reshape_3d(ctx0, sinks, n_head, n_tokens, 1));
+                 ggml_prec_set_acc(cur, GGML_PREC_F32);
+                 res->add_fused_node({LLM_FUSED_OP_FLASH_ATTN, cur, il});
