@@ -37,7 +37,13 @@ def merge_splits(partial, lse):
     return result
 
 
-def paged_splits(tokens):
+def paged_splits(tokens, rows=1):
+    # B70 single-row XMX decode benefits from more independent key tiles on
+    # short prompts and fewer partial results to merge at very long lengths.
+    if rows == 1 and (tokens <= 8192 or tokens >= 131072):
+        tile_count = (max(1, tokens) + 15) // 16
+        partitions = 1 << (tile_count - 1).bit_length()
+        return min(192, max(8, partitions))
     return min(512, max(16, 1 << (max(1, (tokens - 1) // 256).bit_length())))
 
 

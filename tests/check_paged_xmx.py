@@ -8,11 +8,11 @@ import time
 import torch
 
 from inkling_xpu.paged_attention import decode_paged
-from inkling_xpu.split_attention import merge_splits
+from inkling_xpu.split_attention import merge_splits, paged_splits
 
 
 def case(length, rows, page_size, layout, runs):
-    splits = min(512, max(16, 1 << (max(1, (length - 1) // 256).bit_length())))
+    splits = paged_splits(length, rows)
     num_pages = math.ceil(length / page_size)
     pages = torch.randperm(num_pages, device="xpu", dtype=torch.int32).unsqueeze(0)
     shape = (num_pages, 8, page_size, 256) if layout == "HND" else (num_pages, page_size, 8, 256)

@@ -59,7 +59,7 @@ Retrieval on the initial cold 192K and 256K requests (ordinary: 2/2, dspark: 2/2
 
 [Raw context measurements](benchmarks/2026-11-21/agent-decode/context.json) · [Source-review measurements](benchmarks/2026-11-21/agent-decode/source-review.json) · [Previous public checkpoint](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
 
-The follow-up ordinary-decode measurements use medium reasoning and an 8,192-token thinking budget. Sharing the input transform across EXL3 gate and up projection tiles raised median client decode from 58.03 to 58.31–58.36 tok/s on three code prompts. [Kernel checks and measurements](benchmarks/2026-11-21/agent-tuning/README.md)
+The follow-up ordinary-decode measurements use medium reasoning and an 8,192-token thinking budget. The EXL3 input transform and length-dependent single-row XMX attention reached 59.16 and 58.82 client tok/s on two 5K code prompts, up from 58.14 and 57.77. At 196,608 tokens the complete ordinary profile measured 1,394 tok/s prefill and 43.22 tok/s decode on a cold logbook request with 256 outputs. [Kernel checks and measurements](benchmarks/2026-11-21/agent-tuning/README.md)
 
 ## Original prefill measurements
 
