@@ -62,10 +62,10 @@ def complete(base, model, ids, count, salt, expected, case):
     pre = "vllm:request_prefill_time_seconds"
     for _ in range(20):
         after = baseline.vllm_metrics(base, model)
-        if after[dep + "_count"] != before[dep + "_count"]:
+        if after.get(dep + "_count", 0) != before.get(dep + "_count", 0):
             break
         time.sleep(0.25)
-    if any(after[k + "_count"] - before[k + "_count"] != 1 for k in (pre, dep)):
+    if any(after.get(k + "_count", 0) - before.get(k + "_count", 0) != 1 for k in (pre, dep)):
         raise RuntimeError("Expected one completed request in the engine counters")
     cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
     generated = "".join(chunks)
@@ -75,8 +75,8 @@ def complete(base, model, ids, count, salt, expected, case):
         prompt_tokens=len(ids),
         completion_tokens=count,
         cached_tokens=cached,
-        engine_prefill_tps=(len(ids) - cached) / (after[pre + "_sum"] - before[pre + "_sum"]),
-        engine_decode_tps=(count - 1) / (after[dep + "_sum"] - before[dep + "_sum"]),
+        engine_prefill_tps=(len(ids) - cached) / (after[pre + "_sum"] - before.get(pre + "_sum", 0)),
+        engine_decode_tps=(count - 1) / (after[dep + "_sum"] - before.get(dep + "_sum", 0)),
         first_output_seconds=first,
         wall_seconds=elapsed,
         client_decode_tps=(count - 1) / (elapsed - first),

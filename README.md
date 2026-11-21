@@ -19,19 +19,45 @@ prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 | Serving | Text and tools, one sequence, TP1, native XPU decode graphs, validated prefix reuse |
 | API | `http://127.0.0.1:8093/v1`, model `inkling2-mini-exl3-b70` |
 
-## Coding and decode measurements
+## Coding-agent performance
 
-The current full-context DSpark launcher delivered **82.6, 64.9 and 56.7 client output tokens/s** on the three frozen source-review lengths (about 5K, 77K and 155K Inkling input tokens). Each value is a median of three seeded 1,024-token continuations. The archived Qwen medians were 60.6, 53.3 and 44.6. The native 4K logbook timing was **106.7–114.8 decode tok/s**. At 196,608 input tokens the native rates were **1,381 prefill / 57.3 decode**. At 262,016 input plus 128 output tokens they were **1,285 / 40.6**. Both initial long prompts retrieved the code. A 196,608-token cache hit answered the follow-up correctly and took 0.88 s to first output. A cold control on that follow-up repeated the question and missed the code.
+These measurements use one 32 GB Arc Pro B70, one active request and the full 262,144-token server profile with tool support and prefix reuse. The target uses four-bit EXL3 expert weights. DSpark proposes three tokens and vLLM verifies them as a block.
 
-DSpark completed the four original coding fixtures/seeds in **113.7 seconds** with requested effort `none` and **194.2 seconds** with `medium`. All four passed in both settings. Archived Qwen passed all four in **145.9 seconds** at medium effort. The held-out routing and streaming-codec tasks passed once in four runs on Inkling with effort `none`. [Results, settings and raw data](benchmarks/2026-11-21/agent-decode/README.md)
+| Frozen source review | Ordinary client tok/s | DSpark client tok/s | Archived Qwen client tok/s |
+| --- | ---: | ---: | ---: |
+| ~5K Inkling input tokens | 58.1 | 82.6 | 60.6 |
+| ~77K Inkling input tokens | 50.6 | 64.9 | 53.3 |
+| ~155K Inkling input tokens | 44.3 | 56.7 | 44.6 |
 
-### Previous public checkpoint
+Each median covers three reviews of the same source text as Qwen’s archived 4K, 64K and 128K cases. Each run produced 1,024 outputs at temperature 1, top-p 0.95 and top-k 20. Client decode timing starts with the first streamed output. The source-review text has no correctness grade.
 
-In a single-agent replay of three short source reviews (about 5,000 Inkling prompt tokens and 1,024 generated tokens each), the B70 delivered **62.9 output tokens/s** at the streaming client using probabilistic DSpark proposals and block verification. The first public DSpark checkout repeated these three reviews at **63.7 tok/s**. The archived Qwen median for the same source text was 60.6. An earlier greedy DSpark profile reached 53.1 tok/s on these reviews. In a separate warm, greedy-output 4K kernel screen, native depth mixing and grouped controllers reached **59.9 tok/s ordinary** and **96.3–101.7 tok/s with DSpark**.
+| Coding tasks (four runs per row) | Hidden suites passed | Total wall time (s) | Generated tokens |
+| --- | ---: | ---: | ---: |
+| Inkling ordinary, original fixtures, none | 4/4 | 154.8 | 8,149 |
+| Inkling DSpark, original fixtures, none | 4/4 | 113.7 | 9,454 |
+| Inkling ordinary, original fixtures, medium | 4/4 | 304.3 | 17,139 |
+| Inkling DSpark, original fixtures, medium | 4/4 | 194.2 | 16,361 |
+| Archived Qwen, original fixtures, medium | 4/4 | 145.9 | 8,130 |
+| Inkling ordinary, held-out fixtures, none | 1/4 | 312.1 | 17,182 |
+| Inkling DSpark, held-out fixtures, none | 1/4 | 232.3 | 19,145 |
 
-The earlier long-context profile measured **1,389 prefill / 45.1 decode tok/s** with DSpark at 196,608 input tokens and **1,288 / 37.7** at 262,016. Ordinary decode was **38.4** and **31.1 tok/s**, respectively. All four prompts retrieved the inserted code. The coding fixtures also check task completion with hidden tests. [Measurements, settings and reproduction](benchmarks/2026-11-21/agent-decode/README.md)
+The original fixtures cover range-set editing and dependency planning. The held-out fixtures cover routing and a streaming codec. Task times include tool calls and failed attempts. Medium runs request an 8,192-token thinking budget and a 16,384-token output limit. [Per-task results and test settings](benchmarks/2026-11-21/agent-decode/README.md)
 
-That earlier full-context checkout with tool support and prefix reuse reached **57.7–57.9 tok/s ordinary** and **93.5–99.0 tok/s with DSpark** on the two warm 4K kernel-screen prompts. [Full-profile verification and cache results](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
+| Cold logbook prompt | Ordinary prefill / decode (tok/s) | DSpark prefill / decode (tok/s) |
+| --- | ---: | ---: |
+| 4,096 input + 128 output | 1866.7–1868.1 / 59.9–59.9 | 1844.5–1844.7 / 106.7–114.8 |
+| 196,608 input + 128 output | 1,390 / 42.5 | 1,381 / 57.3 |
+| 262,016 input + 128 output | 1,290 / 37.3 | 1,285 / 40.6 |
+
+The logbook timings come from vLLM’s native counters. Each 4K row spans two warm-engine requests with separate cold prompts. The 262,016-token prompt plus 128 outputs fills the advertised context. Each prompt asks for an embedded seven-digit code.
+
+Ordinary reused 196,608 prompt tokens after the client discarded its first continuation. First output arrived in 0.40 s with reuse and 143.4 s with a fresh cache salt. The reuse run missed the code. The fresh-salt follow-up missed it.
+
+DSpark reused 196,608 prompt tokens after the client discarded its first continuation. First output arrived in 0.88 s with reuse and 142.2 s with a fresh cache salt. The reuse run retrieved the code. The fresh-salt follow-up missed it.
+
+Retrieval on the initial cold 192K and 256K requests (ordinary: 2/2, dspark: 2/2).
+
+[Raw context measurements](benchmarks/2026-11-21/agent-decode/context.json) · [Source-review measurements](benchmarks/2026-11-21/agent-decode/source-review.json) · [Previous public checkpoint](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
 
 ## Original prefill measurements
 

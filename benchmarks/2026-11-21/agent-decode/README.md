@@ -13,6 +13,8 @@ The Qwen agent reference ran four successful fixture/seed combinations in 145.88
 
 The published checkout was rebuilt from the pinned Trellis sources and tested with both full-size server profiles. Each server answered two cold 4,096-token prompts with 128 output tokens after warm-up. The DSpark server also reused exactly 8,192 tokens after the client discarded its first continuation. With an audit-field follow-up both warm and cold requests retrieved the code. A repeated-question variant missed the code once with a cache hit, and once in the isolated cold control. Complete continuations can differ with these kernels. The records retain every observed miss. [Checkout verification](checkpoint-smoke.json)
 
+The three held-out DSpark runs that failed at effort `none` were repeated with the same task and seed at `medium`. Neither streaming-codec attempt passed the hidden suite, and the routing retry reached its 150-second limit. The four primary held-out runs have a 240-second limit. These targeted repeats cover previous failures only. [Per-task measurements](coding-tasks.json)
+
 ## Decode experiments
 
 On three short source reviews, the grouped QKV and fused attention-preparation kernels delivered 69.8 client tok/s with the original expert decode. Using the eight-row XMX expert path for four verified positions raised the median to 74.5. The shared group-32 INT8 vocabulary head and the drafter's reference rounding together reached 83.3. Proposal acceptance rose from 45.3% to 51.0% in that last comparison. These screening runs used a 32K serving profile. The full-context coding launcher also enables synchronous prefix reuse.

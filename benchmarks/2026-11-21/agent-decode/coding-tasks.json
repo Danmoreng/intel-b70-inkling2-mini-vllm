@@ -68,6 +68,1018 @@
   ],
   "inkling": [
     {
+      "run": "ordinary-combo-agent-heldout",
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 911701,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 133.01886920000106,
+      "output_tokens": 7298,
+      "engine_decode_tps": 58.13038443877257,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 808,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.9615112879982917
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 876,
+          "cached": 832,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.9016953070022282
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1940,
+          "cached": 976,
+          "out": 4920,
+          "reasoning_tokens": 3425,
+          "wall_seconds": 87.25442302900046
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 6920,
+          "cached": 6848,
+          "out": 349,
+          "reasoning_tokens": 323,
+          "wall_seconds": 6.339619763999508
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 7940,
+          "cached": 7264,
+          "out": 1443,
+          "reasoning_tokens": 49,
+          "wall_seconds": 27.138438915000734
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 9440,
+          "cached": 9376,
+          "out": 122,
+          "reasoning_tokens": 96,
+          "wall_seconds": 2.977344565002568
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 9688,
+          "cached": 9552,
+          "out": 329,
+          "reasoning_tokens": 83,
+          "wall_seconds": 6.16621821499939
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-heldout",
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 912101,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 93.7734194279983,
+      "output_tokens": 5219,
+      "engine_decode_tps": 58.16510655685119,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 808,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.9899280379977426
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 877,
+          "cached": 832,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.9014649389973783
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1941,
+          "cached": 976,
+          "out": 4958,
+          "reasoning_tokens": 3526,
+          "wall_seconds": 87.78469521299849
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 6964,
+          "cached": 6896,
+          "out": 76,
+          "reasoning_tokens": 50,
+          "wall_seconds": 1.6010572689992841
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 7166,
+          "cached": 7024,
+          "out": 49,
+          "reasoning_tokens": 2,
+          "wall_seconds": 1.356327469999087
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-heldout",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 911701,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 40.63203167900065,
+      "output_tokens": 2218,
+      "engine_decode_tps": 58.38915697747246,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.9313426689986954
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 778,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.891623976000119
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1647,
+          "cached": 880,
+          "out": 1930,
+          "reasoning_tokens": 977,
+          "wall_seconds": 34.29293677299938
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3636,
+          "cached": 3568,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.6681743029985228
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3785,
+          "cached": 3648,
+          "out": 129,
+          "reasoning_tokens": 55,
+          "wall_seconds": 2.7178294160003134
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-heldout",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 912101,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 44.687969870003144,
+      "output_tokens": 2447,
+      "engine_decode_tps": 58.31268293262909,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.901694773001509
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 777,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8894141760029015
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1646,
+          "cached": 880,
+          "out": 1963,
+          "reasoning_tokens": 984,
+          "wall_seconds": 34.95642611199946
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3670,
+          "cached": 3600,
+          "out": 221,
+          "reasoning_tokens": 195,
+          "wall_seconds": 4.112151977002213
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 4017,
+          "cached": 3888,
+          "out": 128,
+          "reasoning_tokens": 30,
+          "wall_seconds": 2.6848613309994107
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 67.36160739900151,
+      "output_tokens": 3771,
+      "engine_decode_tps": 58.28597754567836,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.9237630309980887
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 718,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.894528133001586
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1529,
+          "cached": 816,
+          "out": 3329,
+          "reasoning_tokens": 2319,
+          "wall_seconds": 58.353322258000844
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 4928,
+          "cached": 4848,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.715797365999606
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5083,
+          "cached": 4944,
+          "out": 282,
+          "reasoning_tokens": 10,
+          "wall_seconds": 5.347873108003114
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 75.71889499700046,
+      "output_tokens": 4251,
+      "engine_decode_tps": 58.28771654762371,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.9207324060007522
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 718,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8887295549975534
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1529,
+          "cached": 816,
+          "out": 3727,
+          "reasoning_tokens": 2634,
+          "wall_seconds": 65.32570665399908
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5317,
+          "cached": 5248,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.6832645750000665
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5472,
+          "cached": 5328,
+          "out": 364,
+          "reasoning_tokens": 43,
+          "wall_seconds": 6.770905684999889
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 58.675552331998915,
+      "output_tokens": 3294,
+      "engine_decode_tps": 58.28026142182105,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.8834312920007505
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 683,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8742594999966968
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1571,
+          "cached": 784,
+          "out": 2934,
+          "reasoning_tokens": 2361,
+          "wall_seconds": 51.08568673799891
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 4574,
+          "cached": 4496,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.6988148800010094
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 4747,
+          "cached": 4592,
+          "out": 201,
+          "reasoning_tokens": 10,
+          "wall_seconds": 3.9945263839981635
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-medium",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 102.49479595899902,
+      "output_tokens": 5823,
+      "engine_decode_tps": 58.1647803999867,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.8985683110004175
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 684,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8745655850034382
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1572,
+          "cached": 784,
+          "out": 5144,
+          "reasoning_tokens": 4421,
+          "wall_seconds": 89.34898157199859
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 6778,
+          "cached": 6704,
+          "out": 119,
+          "reasoning_tokens": 93,
+          "wall_seconds": 2.3607332530009444
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 7047,
+          "cached": 6896,
+          "out": 423,
+          "reasoning_tokens": 188,
+          "wall_seconds": 7.867653320998215
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 59.74563666999893,
+      "output_tokens": 3002,
+      "engine_decode_tps": 58.395707376804424,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.889185677999194
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 717,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 2.953238406997116
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1528,
+          "cached": 816,
+          "out": 1080,
+          "reasoning_tokens": 2,
+          "wall_seconds": 19.792510711999057
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 2671,
+          "cached": 2592,
+          "out": 170,
+          "reasoning_tokens": 144,
+          "wall_seconds": 3.268826392999472
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 2973,
+          "cached": 2832,
+          "out": 37,
+          "reasoning_tokens": 11,
+          "wall_seconds": 1.1555688620028377
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 3142,
+          "cached": 3008,
+          "out": 52,
+          "reasoning_tokens": 15,
+          "wall_seconds": 1.3594144079979742
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 4254,
+          "cached": 3184,
+          "out": 50,
+          "reasoning_tokens": 24,
+          "wall_seconds": 1.4788305969996145
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 4436,
+          "cached": 4288,
+          "out": 40,
+          "reasoning_tokens": 14,
+          "wall_seconds": 1.1959911189987906
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 4608,
+          "cached": 4464,
+          "out": 1105,
+          "reasoning_tokens": 16,
+          "wall_seconds": 20.45914468099727
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 5777,
+          "cached": 5712,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.6671607290008978
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 5932,
+          "cached": 5792,
+          "out": 309,
+          "reasoning_tokens": 29,
+          "wall_seconds": 5.820925314998021
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-rangeset",
+      "manifest_sha256": "8fb8c12bfc78f84e202dcf658518f289b4a44f0b25c53941e4dabced31023e60",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 8,
+      "error": "",
+      "wall_seconds": 31.35792464699989,
+      "output_tokens": 1677,
+      "engine_decode_tps": 58.580728039788426,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 648,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.889250259999244
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 716,
+          "cached": 672,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8809621740001603
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1527,
+          "cached": 816,
+          "out": 1443,
+          "reasoning_tokens": 411,
+          "wall_seconds": 25.971654842000135
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3028,
+          "cached": 2960,
+          "out": 23,
+          "reasoning_tokens": 0,
+          "wall_seconds": 0.6641171549999854
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3183,
+          "cached": 3040,
+          "out": 76,
+          "reasoning_tokens": 2,
+          "wall_seconds": 1.8111495550001564
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611117,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 37.88977121299831,
+      "output_tokens": 2089,
+      "engine_decode_tps": 58.46051446612131,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.8491939579980681
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8682288490017527
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1590,
+          "reasoning_tokens": 1034,
+          "wall_seconds": 27.894782788000157
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 3228,
+          "cached": 3152,
+          "out": 193,
+          "reasoning_tokens": 167,
+          "wall_seconds": 3.626965060000657
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 3571,
+          "cached": 3408,
+          "out": 171,
+          "reasoning_tokens": 6,
+          "wall_seconds": 3.5178709810024884
+        }
+      ]
+    },
+    {
+      "run": "ordinary-combo-agent-none",
+      "fixture": "mtp-cache-followup-20261111-dependencyplan",
+      "manifest_sha256": "ef0665f78e18feb5f67379bbeaefc652de19a39204d882520aab2f9354dd18d5",
+      "seed": 202611119,
+      "effort": "none",
+      "temperature": 1.0,
+      "max_output": 8192,
+      "thinking_budget": null,
+      "success": true,
+      "hidden_pass": true,
+      "visible_pass": true,
+      "hidden_tests": 9,
+      "error": "",
+      "wall_seconds": 25.829111995997664,
+      "output_tokens": 1381,
+      "engine_decode_tps": 58.64372058689936,
+      "proposed": 0.0,
+      "accepted": 0.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 614,
+          "cached": 0,
+          "out": 31,
+          "reasoning_tokens": 5,
+          "wall_seconds": 0.8493730830014101
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 682,
+          "cached": 640,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.8671714839983906
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1570,
+          "cached": 784,
+          "out": 1011,
+          "reasoning_tokens": 351,
+          "wall_seconds": 18.110157365001214
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 2643,
+          "cached": 2576,
+          "out": 154,
+          "reasoning_tokens": 128,
+          "wall_seconds": 2.910450921001029
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 2947,
+          "cached": 2784,
+          "out": 81,
+          "reasoning_tokens": 5,
+          "wall_seconds": 1.9536923720006598
+        }
+      ]
+    },
+    {
       "run": "dspark-combo-agent-heldout",
       "fixture": "mtp-next-routefix-v2",
       "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
@@ -394,6 +1406,250 @@
           "out": 330,
           "reasoning_tokens": 23,
           "wall_seconds": 4.426287726000737
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium-retry-routefix-911701",
+      "fixture": "mtp-next-routefix-v2",
+      "manifest_sha256": "f4d43ffab5fb3d812ceeb5f3c37f962d4fc3d1eeb98b2fc0fd88b08503b04282",
+      "seed": 911701,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": false,
+      "hidden_tests": 10,
+      "error": "timed out",
+      "wall_seconds": 150.0345381779989,
+      "output_tokens": 9934,
+      "engine_decode_tps": 88.04255011131626,
+      "proposed": 13890.0,
+      "accepted": 8087.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 808,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.8295677520000027
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 878,
+          "cached": 832,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1403362970013404
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 1942,
+          "cached": 976,
+          "out": 8232,
+          "reasoning_tokens": 8192,
+          "wall_seconds": 96.77251099699788
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 10431,
+          "cached": 10160,
+          "out": 1565,
+          "reasoning_tokens": 8,
+          "wall_seconds": 17.675568206999742
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium-retry-streamcodec-911701",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 911701,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 87.57672426700083,
+      "output_tokens": 7376,
+      "engine_decode_tps": 91.97448567875071,
+      "proposed": 7620.0,
+      "accepted": 4831.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 33,
+          "reasoning_tokens": 7,
+          "wall_seconds": 0.7347249390004436
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 779,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.1976831000029051
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1648,
+          "cached": 880,
+          "out": 3800,
+          "reasoning_tokens": 2845,
+          "wall_seconds": 43.010689971997635
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 5515,
+          "cached": 5440,
+          "out": 2492,
+          "reasoning_tokens": 13,
+          "wall_seconds": 29.91489307699885
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 8033,
+          "cached": 8000,
+          "out": 320,
+          "reasoning_tokens": 265,
+          "wall_seconds": 4.0428432899971085
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 8479,
+          "cached": 8352,
+          "out": 627,
+          "reasoning_tokens": 274,
+          "wall_seconds": 8.54098310200061
+        }
+      ]
+    },
+    {
+      "run": "dspark-combo-agent-medium-retry-streamcodec-912101",
+      "fixture": "mtp-next-streamcodec-v2",
+      "manifest_sha256": "7f77c5e41df830d58f8dbcd5f28340ec6d7a31568ef77b2f167ff3d013d63151",
+      "seed": 912101,
+      "effort": "medium",
+      "temperature": 1.0,
+      "max_output": 16384,
+      "thinking_budget": 8192,
+      "success": false,
+      "hidden_pass": false,
+      "visible_pass": true,
+      "hidden_tests": 10,
+      "error": "",
+      "wall_seconds": 86.48739566299992,
+      "output_tokens": 7154,
+      "engine_decode_tps": 89.60100911252981,
+      "proposed": 7587.0,
+      "accepted": 4622.0,
+      "turns": [
+        {
+          "tools": [
+            "list_files"
+          ],
+          "finish": "tool_calls",
+          "input": 709,
+          "cached": 0,
+          "out": 32,
+          "reasoning_tokens": 6,
+          "wall_seconds": 0.7643194219999714
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "read_file"
+          ],
+          "finish": "tool_calls",
+          "input": 778,
+          "cached": 736,
+          "out": 104,
+          "reasoning_tokens": 0,
+          "wall_seconds": 1.103022339000745
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 1647,
+          "cached": 880,
+          "out": 3284,
+          "reasoning_tokens": 2218,
+          "wall_seconds": 38.79504948899921
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "finish": "tool_calls",
+          "input": 4993,
+          "cached": 4928,
+          "out": 2430,
+          "reasoning_tokens": 204,
+          "wall_seconds": 28.889310197999293
+        },
+        {
+          "tools": [
+            "run_tests"
+          ],
+          "finish": "tool_calls",
+          "input": 7449,
+          "cached": 7408,
+          "out": 400,
+          "reasoning_tokens": 340,
+          "wall_seconds": 4.940620751000097
+        },
+        {
+          "tools": [],
+          "finish": "stop",
+          "input": 7975,
+          "cached": 7840,
+          "out": 904,
+          "reasoning_tokens": 392,
+          "wall_seconds": 11.854049073001079
         }
       ]
     },
