@@ -59,6 +59,13 @@ class InklingDraft:
         self.graph_state = None
         if self.reference_math:
             self.mix = self.mix.to(self.w["fuse_weight"].dtype).float()
+        self.draft_mix_norm = getattr(torch.ops.inkling2_xpu, "draft_mix_norm", None)
+        fuse_taps = os.environ.get("INKLING2_DRAFT_FUSED_TAPS", "1") == "1"
+        if fuse_taps and self.draft_mix_norm is not None and self.mix.shape == (4, 4) and self.width == 2304:
+            norms = [self.w[f"layers.{i}.dflare_norm.weight"] for i in range(3)]
+            self.draft_norms = torch.stack([*norms, self.w["markov_head.dflare_norm.weight"]]).float()
+        else:
+            self.draft_mix_norm = None
         self.warmed = set()
         self.kv = []
         self.capacities = []
@@ -123,16 +130,23 @@ class InklingDraft:
     def store(self, features, positions):
         # The local and recurrent rings have slack for a whole verification
         # block. Rejected rows are past the next committed boundary and get overwritten.
-        sources = torch.stack(features, dim=1).float()
+        fused = None
+        if self.draft_mix_norm is not None and len(positions) <= 8:
+            fused = self.draft_mix_norm(*features, self.mix, self.draft_norms)
+        else:
+            sources = torch.stack(features, dim=1).float()
         rotation = self.rotation(positions)
         for i, kv in enumerate(self.kv):
             p = f"layers.{i}."
             limit = self.capacities[i] or len(positions)
-            src = sources[-limit:]
-            mixed = norm((src * self.mix[i, :, None]).sum(1), self.w[p + "dflare_norm.weight"])
+            if fused is not None:
+                mixed = fused[i, -limit:]
+            else:
+                src = sources[-limit:]
+                mixed = norm((src * self.mix[i, :, None]).sum(1), self.w[p + "dflare_norm.weight"])
             k, v = (
                 F.linear(mixed, self.w[p + "self_attn.context_kv"])
-                .view(len(src), 2, self.groups, self.head)
+                .view(len(mixed), 2, self.groups, self.head)
                 .unbind(1)
             )
             k = self.rotate(
@@ -141,6 +155,9 @@ class InklingDraft:
             rows = positions[-limit:]
             self.write_rows(i, rows, k, v)
         ring = self.f_ring.size(0)
+        if fused is not None:
+            self.f_ring[positions[-ring:].remainder(ring)] = fused[-1, -ring:]
+            return
         context = (sources[-ring:] * self.mix[-1, :, None]).sum(1)
         self.f_ring[positions[-ring:].remainder(ring)] = norm(
             context, self.w["markov_head.dflare_norm.weight"]

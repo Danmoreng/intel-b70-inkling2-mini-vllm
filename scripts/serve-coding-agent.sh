@@ -3,7 +3,10 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 mode=${1:-dspark}
 case "$mode" in
-    dspark) export INKLING2_VLLM_DSPARK=1 INKLING2_EXL3_SMALL_DPAS=1 INKLING2_DRAFT_Q8_HEAD=1 INKLING2_DRAFT_REFERENCE_MATH=1 ;;
+    dspark)
+        export INKLING2_VLLM_DSPARK=1 INKLING2_EXL3_SMALL_DPAS=1 INKLING2_DRAFT_Q8_HEAD=1 INKLING2_DRAFT_REFERENCE_MATH=1
+        export INKLING2_DSPARK_LONG_SPLITS=${INKLING2_DSPARK_LONG_SPLITS:-1}
+        ;;
     ordinary) export INKLING2_VLLM_DSPARK=0 ;;
     *) echo "Usage: $0 [dspark|ordinary] [vLLM arguments...]" >&2; exit 2 ;;
 esac

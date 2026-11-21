@@ -23,6 +23,10 @@ prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
 
 These measurements use one 32 GB Arc Pro B70, one active request and the full 262,144-token server profile with tool support and prefix reuse. The target uses four-bit EXL3 expert weights. DSpark proposes three tokens and vLLM verifies them as a block.
 
+With medium reasoning and a cumulative 8,192-token budget, two 5K code prompts reached 59.16 and 58.82 client tok/s in ordinary mode, up from 58.14 and 57.77. The rebuilt DSpark profile with fused draft taps reached 84.59 and 83.66 on those prompts. At 196,608 input tokens, ordinary measured 1,394 prefill / 43.22 decode tok/s and fused DSpark measured 1,389 / 64.71. Both cold requests retrieved the code. On two cold source prompts of about 232K tokens, fused DSpark reached 76.73 and 68.21 client decode tok/s with 1,312–1,316 prefill tok/s. The coding profile uses 128 target partitions for four verification rows from 196,608 tokens. Set `INKLING2_DSPARK_LONG_SPLITS=0` to compare the old schedule and `INKLING2_DRAFT_FUSED_TAPS=0` to compare the tensor implementation of the draft input mix. [Five-experiment study, task times and reproduction commands](benchmarks/2026-11-21/agent-tuning/README.md)
+
+### Earlier reference runs
+
 | Frozen source review | Ordinary client tok/s | DSpark client tok/s | Archived Qwen client tok/s |
 | --- | ---: | ---: | ---: |
 | ~5K Inkling input tokens | 58.1 | 82.6 | 60.6 |
@@ -58,8 +62,6 @@ DSpark reused 196,608 prompt tokens after the client discarded its first continu
 Retrieval on the initial cold 192K and 256K requests (ordinary: 2/2, dspark: 2/2).
 
 [Raw context measurements](benchmarks/2026-11-21/agent-decode/context.json) · [Source-review measurements](benchmarks/2026-11-21/agent-decode/source-review.json) · [Previous public checkpoint](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
-
-The follow-up ordinary-decode measurements use medium reasoning and an 8,192-token thinking budget. The EXL3 input transform and length-dependent single-row XMX attention reached 59.16 and 58.82 client tok/s on two 5K code prompts, up from 58.14 and 57.77. At 196,608 tokens the complete ordinary profile measured 1,394 tok/s prefill and 43.22 tok/s decode on a cold logbook request with 256 outputs. [Kernel checks and measurements](benchmarks/2026-11-21/agent-tuning/README.md)
 
 ## Original prefill measurements
 

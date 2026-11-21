@@ -8,6 +8,7 @@ import triton.language as tl
 
 
 NATIVE_MERGE = os.environ.get("INKLING2_NATIVE_MERGE", "0") == "1"
+LONG_VERIFY_SPLITS = os.environ.get("INKLING2_DSPARK_LONG_SPLITS", "0") == "1"
 
 
 @triton.jit
@@ -40,6 +41,8 @@ def merge_splits(partial, lse):
 def paged_splits(tokens, rows=1):
     # B70 single-row XMX decode benefits from more independent key tiles on
     # short prompts and fewer partial results to merge at very long lengths.
+    if LONG_VERIFY_SPLITS and rows == 4 and tokens >= 196608:
+        return 128
     if rows == 1 and (tokens <= 8192 or tokens >= 131072):
         tile_count = (max(1, tokens) + 15) // 16
         partitions = 1 << (tile_count - 1).bit_length()
