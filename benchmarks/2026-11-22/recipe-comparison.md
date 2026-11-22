@@ -4,7 +4,7 @@ One 32 GB Arc Pro B70 at 180 W served the EXL3 checkpoint with the vision-enable
 
 ## Adaptive DSpark verification
 
-The launcher defaults to three proposals. Set `INKLING2_DSPARK_ADAPTIVE=1 INKLING2_DRAFT_MAX=7` for up to seven. Both profiles applied the same 0.75 confidence threshold and 256-candidate shortlist. Each task used a fresh checkout and a 240-second wall limit. The grader applied the resulting patch and ran ten hidden checks independently.
+At the start of this comparison the launcher defaulted to three proposals. Set `INKLING2_DSPARK_ADAPTIVE=1 INKLING2_DRAFT_MAX=7` for up to seven. Both profiles applied the same 0.75 confidence threshold and 256-candidate shortlist. Each task used a fresh checkout and a 240-second wall limit. The grader applied the resulting patch and ran ten hidden checks independently.
 
 | Pi task | Seed | Cap | Decode tok/s | Proposed / accepted per round | Output tokens | Task seconds | Passed within deadline |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -19,7 +19,7 @@ Decode tok/s pools completed streaming responses. The numerator sums output toke
 
 In the earlier 35,914-token serving measurement, 676 accepted proposals across 348 rounds gave 1.94 accepted draft tokens per round. Including the output token from the target gives 2.94 tokens per round. [Historical serving counters](../2026-11-21/agent-tuning/serving.json)
 
-Across the 3 matched comparisons, client decode rose from 92.85 to 99.76 tok/s (+7.5%). Verification rounds took about 29.69 and 35.45 ms, computed from the engine decode timer divided by speculative rounds. The target accepted the seventh proposal in 12.1% of all wide rounds. The wide runs generated 42,518 tokens in 441.2 s of task time and passed 2/3. The narrow runs generated 29,114 tokens in 331.5 s and passed 1/3. We keep three as the coding default. The evidence comes from two distinct tasks.
+Across the 3 matched comparisons, client decode rose from 92.85 to 99.76 tok/s (+7.5%). Verification rounds took about 29.69 and 35.45 ms, computed from the engine decode timer divided by speculative rounds. The target accepted the seventh proposal in 12.1% of all wide rounds. The wide runs generated 42,518 tokens in 441.2 s of task time and passed 2/3. The narrow runs generated 29,114 tokens in 331.5 s and passed 1/3. After this comparison, the coding default was set to adaptive seven on the basis of the observed repair outcomes. The evidence comes from two distinct tasks.
 
 ## Reusing the global K/V prefix buffer
 

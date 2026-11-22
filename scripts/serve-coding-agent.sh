@@ -5,7 +5,8 @@ mode=${1:-dspark}
 case "$mode" in
     dspark)
         export INKLING2_VLLM_DSPARK=1 INKLING2_EXL3_SMALL_DPAS=1 INKLING2_DRAFT_Q8_HEAD=1 INKLING2_DRAFT_REFERENCE_MATH=1
-        export INKLING2_DRAFT_MAX=${INKLING2_DRAFT_MAX:-3}
+        export INKLING2_DSPARK_ADAPTIVE=${INKLING2_DSPARK_ADAPTIVE:-1}
+        export INKLING2_DRAFT_MAX=${INKLING2_DRAFT_MAX:-7}
         case "$INKLING2_DRAFT_MAX" in
             [1-7]) ;;
             *) echo "INKLING2_DRAFT_MAX must be an integer from 1 to 7" >&2; exit 2 ;;
