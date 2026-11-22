@@ -57,7 +57,7 @@ cat > "$work/plugin/inkling2_b70-0.1.dist-info/entry_points.txt" <<'EOF'
 [vllm.general_plugins]
 inkling2_b70 = inkling_xpu.vllm_plugin:register
 EOF
-python3 - "$work/config/config.json" <<'PY'
+python3 - "$work/config/config.json" "${INKLING2_VISION:-0}" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -70,6 +70,8 @@ config.update(model_type='llama', architectures=['Inkling2B70ForCausalLM'], dtyp
               vocab_size=text['unpadded_vocab_size'], num_hidden_layers=8,
               max_position_embeddings=text['model_max_length'], eos_token_id=checkpoint['eos_token_id'],
               tie_word_embeddings=False)
+if sys.argv[2] == '1':
+    config['architectures'] = ['Inkling2B70ForConditionalGeneration']
 Path(sys.argv[1]).write_text(json.dumps(config, indent=2) + '\n')
 PY
 
@@ -82,6 +84,9 @@ fi
 
 spec_mounts=()
 spec_args=()
+if [[ ${INKLING2_VISION:-0} == 1 ]]; then
+    spec_args+=(--limit-mm-per-prompt '{"image":64}')
+fi
 if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
     base=/opt/venv/lib/python3.12/site-packages/vllm
     mkdir -p "$work/v2"
@@ -109,7 +114,7 @@ if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
     case "$draft_sampling" in greedy|probabilistic) ;; *) exit 2;; esac
     verification=${INKLING2_DSPARK_VERIFICATION:-standard}
     case "$verification" in standard|block) ;; *) exit 2;; esac
-    spec_args=(--speculative-config "{\"method\":\"custom_class\",\"model\":\"inkling_xpu.dspark.InklingDSparkSpeculator\",\"num_speculative_tokens\":$width,\"draft_sample_method\":\"$draft_sampling\",\"rejection_sample_method\":\"$verification\"}")
+    spec_args+=(--speculative-config "{\"method\":\"custom_class\",\"model\":\"inkling_xpu.dspark.InklingDSparkSpeculator\",\"num_speculative_tokens\":$width,\"draft_sample_method\":\"$draft_sampling\",\"rejection_sample_method\":\"$verification\"}")
 fi
 
 if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
@@ -162,6 +167,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --mount "type=bind,source=$PWD,target=/lab,readonly" \
     "${spec_mounts[@]}" "${cache_mounts[@]}" \
     --env PYTHONPATH=/lab:/lab/.work/python:/lab/.work/vllm-inkling/plugin \
+    --env "INKLING2_VISION=${INKLING2_VISION:-0}" \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
     --env "INKLING2_NATIVE_DEPTH_MIX=${INKLING2_NATIVE_DEPTH_MIX:-0}" \

@@ -25,6 +25,7 @@ from .split_attention import local_xmx, paged_splits, paged_xmx
 class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
     # The dense tensors go through vLLM's weight iterator. EXL3 expert shards
     # are loaded one expert at a time into their final packed device arenas.
+    enable_vision = False
     allow_patterns_overrides = ["dense-*.safetensors"]
 
     def __init__(self, *, vllm_config, prefix=""):
@@ -37,7 +38,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             raise ValueError("Inkling XPU requires a BF16 or E4M3 KV cache")
         checkpoint = Path(vllm_config.model_config.model)
         raw = json.loads((checkpoint / "config.json").read_text())
-        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=None), external_slots=1)
+        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=raw["vision_config"] if self.enable_vision else None), external_slots=1)
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
