@@ -1,5 +1,6 @@
 """vLLM image inputs for the Inkling 2 Mini EXL3 target on Intel XPU."""
 
+import os
 from functools import cached_property
 from PIL import Image
 import torch
@@ -158,4 +159,8 @@ class Inkling2B70ForConditionalGeneration(Inkling2B70ForCausalLM, SupportsMultiM
                 yield name, tensor
             if expected:
                 raise ValueError(f"Missing Inkling vision weights: {sorted(expected)[:5]}")
-        return super().load_weights(checked())
+        loaded = super().load_weights(checked())
+        if os.environ.get("INKLING2_VISION_FUSED_QKV", "0") == "1":
+            for layer in self.visual.backbone.layers:
+                layer.self_attn.fuse_qkv()
+        return loaded

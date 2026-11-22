@@ -59,6 +59,7 @@ check_vendor_patch() {
 check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
     9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
+check_vendor_patch xpu/exl3xpu/inkling2/vendor/inkling2_vision.py trellis-inkling-vision-qkv.patch
 
 mkdir -p "$work/config" "$work/plugin/inkling2_b70-0.1.dist-info" .work/python
 ln -sfn ../trellis-serve/xpu/exl3xpu .work/python/inkling_trellis
@@ -191,6 +192,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_PREFILL_DEPTH=${INKLING2_PREFILL_DEPTH:-0}" \
     --env "INKLING2_PREFILL_TIGHT_PREFIX=${INKLING2_PREFILL_TIGHT_PREFIX:-0}" \
     --env "INKLING2_PREFILL_PREFIX_IO=${INKLING2_PREFILL_PREFIX_IO:-0}" \
+    --env "INKLING2_VISION_FUSED_QKV=${INKLING2_VISION_FUSED_QKV:-0}" \
     --env "INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-0}" \
     --env "INKLING2_PREFILL_OUTPUT_CONV=${INKLING2_PREFILL_OUTPUT_CONV:-0}" \
     --env "INKLING2_PREFILL_LOCAL_BIAS=${INKLING2_PREFILL_LOCAL_BIAS:-0}" \

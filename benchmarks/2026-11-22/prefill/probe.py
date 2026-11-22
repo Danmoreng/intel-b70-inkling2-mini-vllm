@@ -20,10 +20,17 @@ def main():
     parser.add_argument("--url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--image", default=RUNTIME)
+    parser.add_argument("--chars", nargs="+", type=int, default=[12000, 55000, 105000],
+                        help="Lengths of the source excerpts, in characters")
+    parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument("--warm-shapes", action="store_true",
+                        help="Run each source length once before collecting samples")
     args = parser.parse_args()
+    if args.repeats < 1 or min(args.chars) < 1 or len(set(args.chars)) != len(args.chars):
+        parser.error("Choose positive, distinct lengths and at least one repeat")
     source = args.corpus.read_text()
-    if len(source) < 105000:
-        parser.error("The corpus needs at least 105,000 characters")
+    if len(source) < max(args.chars):
+        parser.error(f"The corpus needs at least {max(args.chars):,} characters")
     args.output.mkdir(parents=True, exist_ok=False)
 
     archive = args.output / "source.tgz"
@@ -33,9 +40,11 @@ def main():
         tar.addfile(info, io.BytesIO(b"Ready\n"))
 
     rows = []
-    for repeat, chars in [(0, 0)] + [
-        (rep, n) for rep in (1, 2) for n in (12000, 55000, 105000)
-    ]:
+    trials = [(0, 0)]
+    if args.warm_shapes:
+        trials.extend((0, chars) for chars in args.chars)
+    trials.extend((rep, chars) for rep in range(1, args.repeats + 1) for chars in args.chars)
+    for repeat, chars in trials:
         dest = args.output / f"r{repeat}-{chars}"
         issue = "The environment is ready. Reply with the single word READY."
         if chars:
@@ -75,7 +84,7 @@ def main():
             or usage["prompt_tokens_details"]["cached_tokens"]
         ):
             raise RuntimeError(f"Incomplete session or cache hit in {dest}")
-        if chars:
+        if repeat:
             elapsed = wire["engine_delta"]["request_prefill_time_seconds_sum"]
             rows.append(
                 {

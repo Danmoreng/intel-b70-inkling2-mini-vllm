@@ -1,0 +1,67 @@
+diff --git a/xpu/exl3xpu/inkling2/vendor/inkling2_vision.py b/xpu/exl3xpu/inkling2/vendor/inkling2_vision.py
+index 906f9c0..52b2782 100644
+--- a/xpu/exl3xpu/inkling2/vendor/inkling2_vision.py
++++ b/xpu/exl3xpu/inkling2/vendor/inkling2_vision.py
+@@ -71,13 +71,26 @@ class Inkling2VisionAttention(nn.Module):
+         self.k_proj = nn.Linear(width, width, dtype=torch.bfloat16)
+         self.v_proj = nn.Linear(width, width, dtype=torch.bfloat16)
+         self.out_proj = nn.Linear(width, width, dtype=torch.bfloat16)
++        self.qkv_weight = None
++
++    def fuse_qkv(self):
++        # Called once, after the original named tensors have been validated and loaded.
++        if self.qkv_weight is None:
++            projections = (self.q_proj, self.k_proj, self.v_proj)
++            self.qkv_weight = nn.Parameter(torch.cat([p.weight for p in projections]), requires_grad=False)
++            self.qkv_bias = nn.Parameter(torch.cat([p.bias for p in projections]), requires_grad=False)
++            del self.q_proj, self.k_proj, self.v_proj
+ 
+     def forward(self, hidden, positions, lengths, cu_seqlens):
+         shape = (-1, self.num_heads, self.head_dim)
+-        q, k, v = (
+-            projection(hidden).reshape(shape)
+-            for projection in (self.q_proj, self.k_proj, self.v_proj)
+-        )
++        if self.qkv_weight is None:
++            q, k, v = (
++                projection(hidden).reshape(shape)
++                for projection in (self.q_proj, self.k_proj, self.v_proj)
++            )
++        else:
++            packed = F.linear(hidden, self.qkv_weight, self.qkv_bias)
++            q, k, v = (item.reshape(shape) for item in packed.chunk(3, dim=-1))
+         q, k = _rotary(q, k, positions)
+         if hidden.is_cuda:
+             from sglang.kernels.ops.attention.flash_attn.cute import (
+@@ -102,21 +115,16 @@ class Inkling2VisionAttention(nn.Module):
+                 deterministic=True,
+             )
+         else:
+-            output = torch.cat(
+-                [
+-                    F.scaled_dot_product_attention(
+-                        qi.transpose(0, 1).unsqueeze(0),
+-                        ki.transpose(0, 1).unsqueeze(0),
+-                        vi.transpose(0, 1).unsqueeze(0),
+-                        scale=self.head_dim**-0.5,
+-                    )
+-                    .squeeze(0)
+-                    .transpose(0, 1)
+-                    for qi, ki, vi in zip(
+-                        q.split(lengths), k.split(lengths), v.split(lengths)
+-                    )
+-                ]
+-            )
++            outputs = [
++                F.scaled_dot_product_attention(
++                    qi.transpose(0, 1).unsqueeze(0),
++                    ki.transpose(0, 1).unsqueeze(0),
++                    vi.transpose(0, 1).unsqueeze(0),
++                    scale=self.head_dim**-0.5,
++                ).squeeze(0).transpose(0, 1)
++                for qi, ki, vi in zip(q.split(lengths), k.split(lengths), v.split(lengths))
++            ]
++            output = outputs[0] if self.qkv_weight is not None and len(outputs) == 1 else torch.cat(outputs)
+         return self.out_proj(output.reshape(hidden.shape))
+ 
+ 

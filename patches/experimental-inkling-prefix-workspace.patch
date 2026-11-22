@@ -1,0 +1,67 @@
+diff --git a/inkling_xpu/prefix_io.py b/inkling_xpu/prefix_io.py
+--- a/inkling_xpu/prefix_io.py
++++ b/inkling_xpu/prefix_io.py
+@@ -52,11 +52,18 @@
+     tl.store(VH + dst, v, valid)
+ 
+ 
+-def read_heads(key, value, blocks, first, end):
++def read_heads(key, value, blocks, first, end, *, workspace=None):
+     _, page_tokens, heads, width = key.shape
+     n = end - first
+-    k = torch.empty((heads, n, width), device=key.device, dtype=torch.float16)
+-    v = torch.empty_like(k)
++    shape = (heads, n, width)
++    if workspace is None:
++        k = torch.empty(shape, device=key.device, dtype=torch.float16)
++        v = torch.empty_like(k)
++    else:
++        # The gather uses h * n, including on the last, partial prefix block.
++        elements = heads * n * width
++        k = workspace[0, :elements].view(shape)
++        v = workspace[1, :elements].view(shape)
+     fp8 = key.dtype == torch.float8_e4m3fn
+     if fp8:
+         key, value = key.view(torch.uint8), value.view(torch.uint8)
+diff --git a/inkling_xpu/vllm_model.py b/inkling_xpu/vllm_model.py
+--- a/inkling_xpu/vllm_model.py
++++ b/inkling_xpu/vllm_model.py
+@@ -79,6 +79,8 @@
+         self.logit_cap = self.tc["final_logit_softcapping"]
+         self.cache_dtype = torch.float8_e4m3fn if cache.cache_dtype.startswith("fp8") else torch.bfloat16
+         self.prefill_prefix_io = os.environ.get("INKLING2_PREFILL_PREFIX_IO", "0") == "1"
++        self.reuse_prefix_workspace = os.environ.get("INKLING2_PREFILL_KV_WORKSPACE", "0") == "1"
++        self.prefix_workspaces = {}
+         self.tight_prefix = os.environ.get("INKLING2_PREFILL_TIGHT_PREFIX", "0") == "1"
+         self.prefix_block = int(os.environ.get("INKLING2_ONEDNN_PREFIX_BLOCK", "0"))
+         if self.prefix_block:
+@@ -195,7 +197,17 @@
+             read_heads = None
+             if self.prefill_prefix_io and not self.packed_kv:
+                 from .prefix_io import read_heads as gather_heads
+-                read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0])
++                workspace = None
++                if self.reuse_prefix_workspace:
++                    # All gathers and their oneDNN consumers on a stream are ordered.
++                    stream = torch.xpu.current_stream(key_cache.device)
++                    workspace = self.prefix_workspaces.get(stream)
++                    if workspace is None:
++                        workspace = torch.empty((2, self.Hkv * self.prefix_block * self.hd),
++                                                device=key_cache.device, dtype=torch.float16)
++                        self.prefix_workspaces[stream] = workspace
++                read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0],
++                                     workspace=workspace)
+             return [hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
+                                    self.prefix_block, read_kv, split_alignment=self.page_tokens if self.tight_prefix else None,
+                                    read_heads=read_heads)]
+diff --git a/scripts/serve-vllm-exl3.sh b/scripts/serve-vllm-exl3.sh
+--- a/scripts/serve-vllm-exl3.sh
++++ b/scripts/serve-vllm-exl3.sh
+@@ -192,6 +192,7 @@
+     --env "INKLING2_PREFILL_DEPTH=${INKLING2_PREFILL_DEPTH:-0}" \
+     --env "INKLING2_PREFILL_TIGHT_PREFIX=${INKLING2_PREFILL_TIGHT_PREFIX:-0}" \
+     --env "INKLING2_PREFILL_PREFIX_IO=${INKLING2_PREFILL_PREFIX_IO:-0}" \
++    --env "INKLING2_PREFILL_KV_WORKSPACE=${INKLING2_PREFILL_KV_WORKSPACE:-0}" \
+     --env "INKLING2_VISION_FUSED_QKV=${INKLING2_VISION_FUSED_QKV:-0}" \
+     --env "INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-0}" \
+     --env "INKLING2_PREFILL_OUTPUT_CONV=${INKLING2_PREFILL_OUTPUT_CONV:-0}" \
