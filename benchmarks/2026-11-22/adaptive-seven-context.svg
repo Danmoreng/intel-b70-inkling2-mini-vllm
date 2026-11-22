@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="704" viewBox="0 0 1024 704" role="img" aria-labelledby="title desc">
+<title id="title">Inkling 2 Mini on Intel Arc Pro B70 – Prefill and Decode</title>
+<desc id="desc">Cold prompts from 2,000 to 128,000 tokens. At 128,000 input tokens, the engine reaches 2,157 tokens/s for prefill and 53.8 tokens/s for decode.</desc>
+<defs><linearGradient id="prefill" x1="0" x2="0" y1="0" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#168574" stop-opacity=".18"/><stop offset="1" stop-color="#168574" stop-opacity=".02"/></linearGradient><linearGradient id="decode" x1="0" x2="0" y1="0" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#6652b3" stop-opacity=".18"/><stop offset="1" stop-color="#6652b3" stop-opacity=".02"/></linearGradient></defs>
+<rect width="1024" height="704" fill="#f5f6f3"/><rect width="1024" height="125" fill="#182e31"/>
+<g font-family="Source Sans 3">
+<text x="44.0" y="35.0" font-size="17" fill="#a5e2d0" font-weight="650" text-anchor="start">INTEL ARC PRO B70  /  32 GB  /  180 W</text>
+<text x="44.0" y="86.0" font-size="48" fill="#ffffff" font-weight="690" text-anchor="start">Inkling 2 Mini</text>
+<text x="980.0" y="57.0" font-size="22" fill="#ffffff" font-weight="600" text-anchor="end">4-bit EXL3 · vLLM</text>
+<text x="980.0" y="89.0" font-size="20" fill="#d0dfdc" font-weight="400" text-anchor="end">Adaptive DSpark · up to 7 draft tokens</text>
+<rect x="34" y="141" width="956" height="208" rx="13" fill="#ffffff"/>
+<text x="58.0" y="174.0" font-size="28" fill="#182e31" font-weight="690" text-anchor="start">Prefill</text>
+<text x="957.0" y="173.0" font-size="17" fill="#536563" font-weight="500" text-anchor="end">tokens/s</text>
+<path d="M116 323.5H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="328.5" font-size="16" fill="#586866" font-weight="400" text-anchor="end">2,000</text>
+<path d="M116 269.4H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="274.4" font-size="16" fill="#586866" font-weight="400" text-anchor="end">2,400</text>
+<path d="M116 215.3H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="220.3" font-size="16" fill="#586866" font-weight="400" text-anchor="end">2,800</text>
+<path d="M116.00 221.68 L252.00 224.08 L524.00 254.05 L660.00 252.75 L796.00 269.84 L932.00 302.26 L932 337 H116 Z" fill="url(#prefill)"/>
+<path d="M116.00 221.68 L252.00 224.08 L524.00 254.05 L660.00 252.75 L796.00 269.84 L932.00 302.26" fill="none" stroke="#087669" stroke-width="3.5" stroke-linejoin="round"/>
+<circle cx="116.00" cy="221.68" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="116.0" y="207.7" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,753</text>
+<circle cx="252.00" cy="224.08" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="252.0" y="210.1" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,735</text>
+<circle cx="524.00" cy="254.05" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="524.0" y="240.1" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,513</text>
+<circle cx="660.00" cy="252.75" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="660.0" y="238.7" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,523</text>
+<circle cx="796.00" cy="269.84" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="796.0" y="255.8" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,397</text>
+<circle cx="932.00" cy="302.26" r="5.5" fill="#087669" stroke="white" stroke-width="2"/>
+<text x="932.0" y="288.3" font-size="20" fill="#087669" font-weight="700" text-anchor="middle">2,157</text>
+<rect x="34" y="382" width="956" height="195" rx="13" fill="#ffffff"/>
+<text x="58.0" y="415.0" font-size="28" fill="#182e31" font-weight="690" text-anchor="start">Decode</text>
+<text x="957.0" y="414.0" font-size="17" fill="#536563" font-weight="500" text-anchor="end">tokens/s</text>
+<path d="M116 565.0H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="570.0" font-size="16" fill="#586866" font-weight="400" text-anchor="end">40</text>
+<path d="M116 524.0H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="529.0" font-size="16" fill="#586866" font-weight="400" text-anchor="end">60</text>
+<path d="M116 483.1H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="488.1" font-size="16" fill="#586866" font-weight="400" text-anchor="end">80</text>
+<path d="M116 442.1H932" stroke="#dbe4e1" stroke-width="1"/>
+<text x="87.0" y="447.1" font-size="16" fill="#586866" font-weight="400" text-anchor="end">100</text>
+<path d="M116.00 462.97 L252.00 463.19 L524.00 483.75 L660.00 474.29 L796.00 504.88 L932.00 536.72 L932 565 H116 Z" fill="url(#decode)"/>
+<path d="M116.00 462.97 L252.00 463.19 L524.00 483.75 L660.00 474.29 L796.00 504.88 L932.00 536.72" fill="none" stroke="#6248a7" stroke-width="3.5" stroke-linejoin="round"/>
+<circle cx="116.00" cy="462.97" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="116.0" y="449.0" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">89.8</text>
+<circle cx="252.00" cy="463.19" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="252.0" y="449.2" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">89.7</text>
+<circle cx="524.00" cy="483.75" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="524.0" y="469.8" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">79.7</text>
+<circle cx="660.00" cy="474.29" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="660.0" y="460.3" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">84.3</text>
+<circle cx="796.00" cy="504.88" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="796.0" y="490.9" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">69.4</text>
+<circle cx="932.00" cy="536.72" r="5.5" fill="#6248a7" stroke="white" stroke-width="2"/>
+<text x="932.0" y="522.7" font-size="20" fill="#6248a7" font-weight="700" text-anchor="middle">53.8</text>
+<text x="116.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">2K</text>
+<text x="252.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">4K</text>
+<text x="524.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">16K</text>
+<text x="660.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">32K</text>
+<text x="796.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">64K</text>
+<text x="932.0" y="601.0" font-size="18" fill="#263d3b" font-weight="650" text-anchor="middle">128K</text>
+<text x="524.0" y="631.0" font-size="18" fill="#465b57" font-weight="400" text-anchor="middle">Input context length (tokens, logarithmic scale)</text>
+<path d="M44 650H980" stroke="#cfd9d4"/>
+<text x="44.0" y="680.0" font-size="17" fill="#435954" font-weight="400" text-anchor="start">One cold prompt per length · 256 output tokens · engine timings</text>
+<text x="980.0" y="680.0" font-size="17" fill="#435954" font-weight="500" text-anchor="end">November 22, 2026</text>
+</g></svg>
