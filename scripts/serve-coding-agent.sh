@@ -11,7 +11,7 @@ case "$mode" in
     *) echo "Usage: $0 [dspark|ordinary] [vLLM arguments...]" >&2; exit 2 ;;
 esac
 if (( $# )); then shift; fi
-export INKLING2_VLLM_BATCH=2048 INKLING2_VLLM_KV_TYPE=fp8_e4m3 INKLING2_ONEDNN_PREFIX_BLOCK=8192
+export INKLING2_VLLM_BATCH=${INKLING2_VLLM_BATCH:-2048} INKLING2_VLLM_KV_TYPE=fp8_e4m3 INKLING2_ONEDNN_PREFIX_BLOCK=8192
 export INKLING2_EXL3_PREFILL_MIN=256 INKLING2_EXL3_PAIR_MAX=8
 export INKLING2_EXL3_MOE_LIB=/lab/.work/build/inkling2-exl3-moe-mb32.so
 export INKLING2_CONTROL_LIB=/lab/.work/build/inkling2-loop-control.so
