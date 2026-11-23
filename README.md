@@ -30,6 +30,28 @@ For browser screenshots, use the optional image-enabled coding profile below. A 
 INKLING2_VISION=1 INKLING2_DSPARK_ADAPTIVE=1 bash scripts/serve-coding-agent.sh dspark --max-num-batched-tokens 4096
 ```
 
+## Serving performance at 180 W
+
+Across **20 scenarios, 70 measured waves and 124 requests**, Inkling delivered **52.37 output tok/s** over summed wave time. Qwen3.8-27B EXL3 delivered **51.68 tok/s** on the same source text. Each request produced exactly 1,024 sampled tokens with thinking off. Both runs completed with zero preemptions. The 17 warmup waves and the separate 64K prefix check are excluded.
+
+| Inkling workload | Actual input tokens per client | First token | Active decode | Whole-wave output |
+| --- | ---: | ---: | ---: | ---: |
+| 4K cold, one client | 5,292 | 1.59 s | 81.16 tok/s | 71.93 tok/s |
+| 64K cold, one client | 77,274 | 27.47 s | 74.46 tok/s | 24.86 tok/s |
+| 128K cold, one client | 154,584 | 63.12 s | 61.82 tok/s | 12.75 tok/s |
+| 195K cold, one client | 230,861 | 105.82 s | 51.13 tok/s | 8.14 tok/s |
+| 16K prefix resend, one client | 18,187 | 0.13 s | 80.47 tok/s | 79.88 tok/s |
+| 64K prefix resend, one client | 74,690 | 24.34 s | 58.85 tok/s | 36.17 tok/s |
+| 4K each, four clients | 4,945 | 22.43 s | 83.88 tok/s | 74.98 tok/s |
+
+The workload labels use Qwen's input budgets. Actual inputs use the Inkling tokenizer and show the per-wave mean client length at C4. Table entries are wave medians, with two resends for each prefix. With four simultaneous clients, the scheduler admitted one sequence and queued up to 3. Whole-wave output includes that wait and prefill. Both 16K resends hit the cache. Only the first 64K resend hit in the matrix, and its visible output arrived at the end of generation.
+
+![Single-client prefill, decode and first-token latency on Inkling and Qwen](benchmarks/2026-11-23/serving/serving-context.png)
+
+![Serving throughput and latency for one to four simultaneous clients](benchmarks/2026-11-23/serving/serving-concurrency.png)
+
+[Full results, prefix controls, per-wave evidence and reproduction](benchmarks/2026-11-23/serving/README.md)
+
 ## Validated profile
 
 | Setting | Reference configuration |
