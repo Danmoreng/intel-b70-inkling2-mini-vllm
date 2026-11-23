@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from serving_decode import active_decode
+
 MODEL = "inkling2-mini-exl3-b70"
 BERLIN = ZoneInfo("Europe/Berlin")
 REFERENCE = "0356a370da5f73f6b0a4eab613d7103a2356b513"
@@ -30,7 +32,7 @@ INVENTORIES = {
 def runtime_receipt(container):
     """Capture the image, selected native libraries and mounted vLLM overrides."""
     item = json.loads(subprocess.check_output(["docker", "inspect", container]))[0]
-    env = dict(v.split("=", 1) for v in item["Config"]["Env"] if v.startswith("INKLING2_"))
+    env = dict(v.split("=", 1) for v in item["Config"]["Env"] if v.startswith("INKLING2_") and "=" in v)
     volumes = {v["Destination"]: Path(v["Source"]) for v in item["Mounts"]}
     repo = volumes["/lab"]
     files = {dest: src for dest, src in volumes.items() if src.is_file()}
@@ -198,10 +200,12 @@ def main():
                     "all_finish_reasons_length", "admission_expectation_met"
                 )):
                     raise RuntimeError("Incomplete or incorrectly accounted serving wave")
-                if args.batching_4k and case.concurrency > 1 and (
-                    row["peak_running"] != case.concurrency or not row["fully_overlapped_aggregate_decode_tokens_per_s"]
-                ):
-                    raise RuntimeError(f"Missing simultaneous decode at C{case.concurrency}")
+                if args.batching_4k or case.concurrency > 1:
+                    wave = out / group / f"{case.name}-r{rep + 1}"
+                    decode = active_decode(wave, row)
+                    if args.batching_4k and (row["peak_running"] != case.concurrency or not decode["aggregate_decode_tps"]):
+                        raise RuntimeError(f"Missing simultaneous decode at C{case.concurrency}")
+                    row = dict(scenario=case.name, repeat=rep + 1, **decode)
                 with (out / (group + ".jsonl")).open("a") as f:
                     print(json.dumps(row), file=f)
     if bench.inspect_container(args.container)["id"] != config["id"]:
