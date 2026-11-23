@@ -142,7 +142,7 @@ if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
     patch --silent --batch --forward --fuzz=0 -d "$work/text-renderer" -p1 < patches/vllm-inkling-text-renderer.patch
     spec_mounts+=(--mount "type=bind,source=$work/text-renderer/$file,target=$base/$file,readonly")
     spec_args+=(--tokenizer-mode inkling --enable-auto-tool-choice --tool-call-parser inkling --reasoning-parser inkling
-                --enable-prompt-tokens-details)
+                --enable-prompt-tokens-details --enable-per-request-metrics)
     if [[ ${INKLING2_REASONING_BUDGET:-0} == 1 ]]; then
         budget_library=/lab/.work/build/inkling2-reasoning-budget.so
         test -s "${budget_library#/lab/}" || { echo 'Build the coding kernels with scripts/build-loop-control.sh.' >&2; exit 1; }
