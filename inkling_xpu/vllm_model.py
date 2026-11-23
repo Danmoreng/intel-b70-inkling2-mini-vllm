@@ -20,7 +20,7 @@ from . import packed_kv
 from .exl3_experts import InklingEXL3Experts
 from .paged_attention import decode_paged
 from .prefix_attention import hybrid_prefill
-from .split_attention import local_xmx, paged_splits, paged_xmx
+from .split_attention import TUNE_VERIFY, local_splits, local_xmx, paged_splits, paged_xmx
 
 
 class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
@@ -226,6 +226,8 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
 
     def _static_forward(self, ids, positions, batch, embeds=None):
         size = positions.numel()
+        if TUNE_VERIFY and self.local_xmx is not None:
+            self.local_xmx = partial(local_xmx, parts=local_splits(batch.total_tokens, size))
         self._st_nq = size
         self._st_req_slots = torch.zeros(1, dtype=torch.int32, device=positions.device)
         self._st_slot = torch.zeros(size, dtype=torch.long, device=positions.device)
@@ -246,7 +248,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if self.use_paged_xmx:
             splits = (paged_splits(batch.total_tokens, size) if self.cache_dtype == torch.float8_e4m3fn
                       and self.page_tokens % 16 == 0 else splits)
-        key = (splits, tuple(batch.block_table.shape), ids.dtype,
+        key = (splits, local_splits(batch.total_tokens, size), tuple(batch.block_table.shape), ids.dtype,
                tuple(cache.data_ptr() for cache in batch.caches))
         state = self.decode_graphs.get(size)
         if state is None or state.key != key:

@@ -13,3 +13,7 @@
   licensed under Apache 2.0. [vLLM license](licenses/vllm.txt).
 - The checkpoint downloads link to the respective publishers' repositories and
   terms. See [setup](docs/SETUP.md) for pinned revisions.
+- The experimental single-token SYCL kernel is adapted from SergiioB's
+  Intel Arc Pro B70 cookbook. The kernel file carries an Apache-2.0 header.
+  [Upstream source](https://github.com/SergiioB/intel-arc-pro-b70-inference-cookbook/blob/af03fa9/patches/inkling2-mini-vllm-xpu/attn_decode_xe2.cpp)
+  · [Apache 2.0 license](licenses/vllm.txt).

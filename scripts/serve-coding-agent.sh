@@ -19,6 +19,9 @@ esac
 if (( $# )); then shift; fi
 case ${INKLING2_PREFILL_PROFILE:-reference} in
     optimized)
+        if [[ $mode == dspark ]]; then
+            export INKLING2_DSPARK_VERIFY_TUNING=${INKLING2_DSPARK_VERIFY_TUNING:-1}
+        fi
         export INKLING2_EXL3_PREFILL_MIN=${INKLING2_EXL3_PREFILL_MIN:-48}
         export INKLING2_ONEDNN_PREFIX_BLOCK=${INKLING2_ONEDNN_PREFIX_BLOCK:-8192}
         export INKLING2_PREFILL_BANK=${INKLING2_PREFILL_BANK:-1}
