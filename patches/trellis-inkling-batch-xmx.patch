@@ -1,0 +1,120 @@
+--- a/inkling2_ops.sycl
++++ b/inkling2_ops.sycl
+@@ -772,7 +772,7 @@
+     return bits.template bit_cast_view<fp16>().read() * fp16(256.f);
+ }
+ 
+-template <int M, bool Local = false, bool Draft = false> struct PagedXmx {
++template <int M, bool Local = false, bool Draft = false, bool Batched = false> struct PagedXmx {
+     const fp16 *q;
+     const uint8_t *k, *v;
+     const int *pages, *length, *positions;
+@@ -780,10 +780,37 @@
+     float *output, *lse;
+     int splits, page_size, block_stride, token_stride, head_stride, extent;
+     bool packed = false;
++    const int *query_offsets = nullptr, *ring_slots = nullptr;
++    int total_rows = M, page_columns = 0;
+ 
+     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+-        constexpr int R = 3 * M, tiles = (R + 7) / 8;
++        constexpr int tiles = (3 * M + 7) / 8;
+         int id = it.get_global_id(0);
++        int row0 = 0, R = 3 * M;
++        auto q = this->q;
++        auto k = this->k, v = this->v;
++        auto pages = this->pages, length = this->length, positions = this->positions;
++        auto table = this->table, sink = this->sink;
++        if constexpr (Batched) {
++            const int per_request = tiles * 8 * splits, request = id / per_request;
++            id %= per_request;
++            row0 = query_offsets[request];
++            R = 3 * (query_offsets[request + 1] - row0);
++            if ((id % tiles) * 8 >= R) return;
++            q += row0 * 24 * 128;
++            positions += row0;
++            length += request;
++            table += size_t(row0) * 24 * extent;
++            sink += row0 * 24;
++            if constexpr (Local) {
++                const int slot = ring_slots[request];
++                pages += slot * page_columns;
++                k += size_t(slot) * page_size * token_stride * 2;
++                v += size_t(slot) * page_size * token_stride * 2;
++            } else {
++                pages += request * page_columns;
++            }
++        }
+         const int tile = id % tiles, hk = (id / tiles) % 8, part = id / (tiles * 8);
+         int start = positions[0], L = Draft ? start + M : length[0];
+         const int lo = Local && start >= 1024 ? (start - 1023) / 16 : 0;
+@@ -938,7 +965,7 @@
+             int r = tile * 8 + row;
+             if (r >= R)
+                 break;
+-            int dest = part * M * 24 + (r / 3) * 24 + hk * 3 + r % 3;
++            int dest = (part * total_rows + row0 + r / 3) * 24 + hk * 3 + r % 3;
+             simd<float, 128> o;
+             float den = total[row];
+ #pragma unroll
+@@ -1146,6 +1173,51 @@
+     }
+ }
+ 
++// Ragged verification: each workgroup attends to rows from exactly one request.
++void batch_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor pages, at::Tensor lengths,
++               at::Tensor positions, at::Tensor table, at::Tensor sink, at::Tensor offsets, at::Tensor slots,
++               at::Tensor out, at::Tensor lse, bool local, bool packed, int64_t max_rows) {
++    const int rows = q.size(0), requests = slots.numel(), splits = out.size(0);
++    TORCH_CHECK(q.is_xpu() && q.is_contiguous() && q.scalar_type() == at::kHalf &&
++                q.sizes() == at::IntArrayRef({rows, 24, 128}) && requests >= 1 && requests <= 4 &&
++                max_rows >= 1 && max_rows <= 8 && rows >= requests && rows <= requests * max_rows);
++    for (const auto &t : {pages, lengths, positions, offsets, slots})
++        TORCH_CHECK(t.device() == q.device() && t.is_contiguous() && t.scalar_type() == at::kInt);
++    for (const auto &t : {table, sink, out, lse})
++        TORCH_CHECK(t.device() == q.device() && t.is_contiguous() && t.scalar_type() == at::kFloat);
++    TORCH_CHECK(offsets.numel() == requests + 1 && lengths.numel() == requests &&
++                positions.numel() == rows && pages.dim() == 2 && pages.size(1) > 0);
++    TORCH_CHECK(table.dim() == 3 && table.size(0) == rows && table.size(1) == 24 && table.size(2) > 0 &&
++                sink.numel() == rows * 24 && splits > 0 && out.sizes() == at::IntArrayRef({splits,rows,24,128}) &&
++                lse.sizes() == at::IntArrayRef({splits,rows,24}));
++    TORCH_CHECK(k.device() == q.device() && v.device() == q.device() && k.sizes() == v.sizes() &&
++                k.scalar_type() == v.scalar_type() && k.strides() == v.strides() && k.stride(-1) == 1 &&
++                k.size(-1) == 128 && k.size(-2) == 8);
++    if (local) {
++        TORCH_CHECK(!packed && k.dim() == 3 && k.scalar_type() == at::kBFloat16 && k.is_contiguous() &&
++                    pages.size(1) >= 1040 && pages.size(1) % 16 == 0 && pages.numel() == k.size(0));
++    } else {
++        TORCH_CHECK(k.dim() == 4 && k.scalar_type() == at::kFloat8_e4m3fn &&
++                    k.size(1) >= 16 && k.size(1) % 16 == 0 && pages.size(0) == requests);
++    }
++    auto launch = [&]<int MaxRows, bool Local>() {
++        fa::PagedXmx<MaxRows, Local, false, true> kern{
++            reinterpret_cast<const sycl::half *>(q.data_ptr()), reinterpret_cast<const uint8_t *>(k.data_ptr()),
++            reinterpret_cast<const uint8_t *>(v.data_ptr()), pages.data_ptr<int>(), lengths.data_ptr<int>(),
++            positions.data_ptr<int>(), table.data_ptr<float>(), sink.data_ptr<float>(), out.data_ptr<float>(),
++            lse.data_ptr<float>(), splits, int(Local ? pages.size(1) : k.size(1)), int(k.stride(0)),
++            int(k.stride(Local ? 0 : 1)), int(k.stride(Local ? 1 : 2)), int(table.size(2)), packed,
++            offsets.data_ptr<int>(), slots.data_ptr<int>(), rows, int(pages.size(1))};
++        size_t n = requests * splits * 8 * ((MaxRows * 3 + 7) / 8);
++        queue_of(q).submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(n, 1), kern); });
++    };
++    if (max_rows <= 2) {
++        if (local) launch.template operator()<2, true>(); else launch.template operator()<2, false>();
++    } else {
++        if (local) launch.template operator()<8, true>(); else launch.template operator()<8, false>();
++    }
++}
++
+ // DSpark global context and the eight jointly visible query-block rows share
+ // one contiguous E4M3 cache. The last physical tile is explicitly padded.
+ void draft_global_xmx(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start, at::Tensor out,
+@@ -1282,6 +1354,8 @@
+ TORCH_LIBRARY(inkling2_xpu, m) {
+     m.def("draft_global_xmx(Tensor q, Tensor k, Tensor v, Tensor start, Tensor(a!) out, Tensor(b!) lse) -> ()");
+     m.impl("draft_global_xmx", torch::kXPU, &inkling2::draft_global_xmx);
++    m.def("batch_xmx(Tensor q, Tensor k, Tensor v, Tensor pages, Tensor lengths, Tensor positions, Tensor table, Tensor sink, Tensor offsets, Tensor slots, Tensor(a!) out, Tensor(b!) lse, bool local, bool packed, int max_rows) -> ()");
++    m.impl("batch_xmx", torch::kXPU, &inkling2::batch_xmx);
+     m.def("local_xmx(Tensor q, Tensor k, Tensor v, Tensor ring_positions, Tensor length, Tensor positions, Tensor table, Tensor sink, Tensor(a!) out, Tensor(b!) lse) -> ()");
+     m.impl("local_xmx",torch::kXPU,&inkling2::local_xmx);
+     m.def("packed_kv_store(Tensor(a!) arena, Tensor rows, Tensor key, Tensor value) -> ()");

@@ -13,13 +13,13 @@ source_file=xpu/csrc/inkling2_ops.sycl
 mode=${1:-paged}
 minutes=9
 case "$mode" in
-    paged|paged-fused) ;;
+    paged|paged-fused|paged-batch) ;;
     exl3)
         patch_file="$PWD/patches/trellis-inkling-exl3-mcg-situ.patch"
         source_file=xpu/csrc/exl3_moe.sycl
         minutes=12
         ;;
-    *) echo 'Use paged, paged-fused or exl3.' >&2; exit 2 ;;
+    *) echo 'Use paged, paged-fused, paged-batch or exl3.' >&2; exit 2 ;;
 esac
 deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
 if (( $(date +%s) + minutes * 60 >= deadline )); then
@@ -110,13 +110,20 @@ fi
 lib_name=inkling2-vllm.so
 source_mount=()
 check_args=()
-if [[ "$mode" == paged-fused ]]; then
+if [[ "$mode" == paged-fused || "$mode" == paged-batch ]]; then
     lib_name=inkling2-vllm-fused-bias.so
     staged="$output/inkling2_fused_bias.sycl"
     patch --silent --batch --fuzz=0 --output="$staged" "$vendor/$source_file" \
         "$PWD/patches/trellis-inkling-fused-local-bias.patch"
+    if [[ "$mode" == paged-batch ]]; then
+        lib_name=inkling2-vllm-batch.so
+        patch --silent --batch --fuzz=0 --output="$output/inkling2_batch.sycl" "$staged" \
+            "$PWD/patches/trellis-inkling-batch-xmx.patch"
+        staged="$output/inkling2_batch.sycl"
+    fi
     source_mount=(--mount "type=bind,source=$staged,target=/opt/trellis-serve/$source_file,readonly")
     check_args=(--fused-bias)
+    if [[ "$mode" == paged-batch ]]; then check_args+=(--batch); fi
 fi
 rm -f -- "$output/$lib_name.new"
 if ! timeout --kill-after=10s 5m docker run --rm --name "$build_name" --network none \

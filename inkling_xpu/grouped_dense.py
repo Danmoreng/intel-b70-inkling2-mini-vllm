@@ -26,8 +26,17 @@ class GroupedQKV:
         self.scales = torch.cat(scales).contiguous()
 
     def __call__(self, query, key, value):
+        if query.shape[0] > 8:
+            outputs = [self.project(q, k_in, v_in) for q, k_in, v_in in
+                       zip(query.split(8), key.split(8), value.split(8), strict=True)]
+            out = torch.cat(outputs)
+        else:
+            out = self.project(query, key, value)
+        return [out.narrow(1, offset, width) for offset, width in zip(self.bounds, self.widths)]
+
+    def project(self, query, key, value):
         _, k, v, n = self.bounds
-        out = torch.ops.inkling_qkv.dense(
+        return torch.ops.inkling_qkv.dense(
             query.contiguous(),
             key.contiguous(),
             value.contiguous(),
@@ -39,4 +48,3 @@ class GroupedQKV:
             self.splits,
             True,
         )
-        return [out.narrow(1, offset, width) for offset, width in zip(self.bounds, self.widths)]

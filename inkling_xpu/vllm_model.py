@@ -1,6 +1,7 @@
-"""Batch-one vLLM adapter for the Intel XPU Inkling EXL3 model."""
+"""vLLM adapter for the Intel XPU Inkling EXL3 model."""
 
 import json
+from contextlib import contextmanager
 from functools import partial
 import logging
 import os
@@ -17,12 +18,13 @@ from vllm.model_executor.layers.attention import Attention
 from vllm.v1.attention.backends.triton_attn import TritonAttentionBackend
 
 from . import packed_kv
+from .batch_graph import BatchGraphs
 from .exl3_experts import InklingEXL3Experts
 from .paged_attention import decode_paged
 from .prefix_attention import hybrid_prefill
 from .prefix_tail import PrefillTail
 from .ring_prefix import RingPrefix
-from .split_attention import TUNE_VERIFY, local_splits, local_xmx, paged_splits, paged_xmx
+from .split_attention import TUNE_VERIFY, batch_xmx, local_splits, local_xmx, paged_splits, paged_xmx
 
 
 class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
@@ -32,16 +34,19 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
     allow_patterns_overrides = ["dense-*.safetensors"]
 
     def __init__(self, *, vllm_config, prefix=""):
-        if vllm_config.scheduler_config.max_num_seqs != 1 or not vllm_config.model_config.enforce_eager:
-            raise ValueError("Inkling XPU currently requires --max-num-seqs 1 --enforce-eager")
+        slots = vllm_config.scheduler_config.max_num_seqs
+        if not 1 <= slots <= 4 or not vllm_config.model_config.enforce_eager:
+            raise ValueError("Inkling XPU currently requires one to four slots and --enforce-eager")
+        if slots != int(os.environ.get("INKLING2_MAX_SEQS", "1")):
+            raise ValueError("Set INKLING2_MAX_SEQS to configure both vLLM and the Inkling slot scheduler")
         cache = vllm_config.cache_config
         if cache.enable_prefix_caching != (os.environ.get("INKLING2_RING_PREFIX", "0") == "1"):
-            raise ValueError("Prefix caching requires the single-slot ring history scheduler")
+            raise ValueError("Prefix caching requires the matching ring history scheduler")
         if cache.cache_dtype not in ("auto", "bfloat16", "fp8", "fp8_e4m3"):
             raise ValueError("Inkling XPU requires a BF16 or E4M3 KV cache")
         checkpoint = Path(vllm_config.model_config.model)
         raw = json.loads((checkpoint / "config.json").read_text())
-        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=raw["vision_config"] if self.enable_vision else None), external_slots=1)
+        super().__init__(SimpleNamespace(inkling_text=raw["text_config"], inkling_vision=raw["vision_config"] if self.enable_vision else None), external_slots=slots)
         self.prefill_controller = os.environ.get("INKLING2_PREFILL_CONTROLLER", "0") == "1"
         self.prefill_bank = os.environ.get("INKLING2_PREFILL_BANK", "0") == "1"
         self.prefill_dense_bf16 = os.environ.get("INKLING2_PREFILL_DENSE_BF16", "0") == "1"
@@ -64,6 +69,14 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
                                    and (cache.block_size or 16) % 16 == 0):
             raise ValueError("The XMX-packed cache requires paged XMX and FP8 KV with 16-token tiles")
         self.warmed_shapes = set()
+        self.slot_graphs = [{} for _ in range(slots)]
+        self.slot_histories = [SimpleNamespace(high=0, frontier=0, rings=[], tail=None) for _ in range(slots)]
+        self.inkling_batch = None
+        self.batch_layout = None
+        self.fast_batch = False
+        self.batch_graphs = BatchGraphs()
+        self.trace_batch = os.environ.get("INKLING2_TRACE_BATCH") == "1"
+        self.traced_shapes = set()
         self.compare_graph = os.environ.get("INKLING2_COMPARE_GRAPH", "0") == "1"
         spec = vllm_config.speculative_config
         self.want_dspark = spec is not None and spec.model == "inkling_xpu.dspark.InklingDSparkSpeculator"
@@ -119,10 +132,21 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if os.environ.get("INKLING2_PREFILL_DEPTH", "0") == "1":
             from .prefill_depth import DepthQueries
             self.prefill_depth = DepthQueries(self.w, self.D)
+        if self.n_slots > 1:
+            # The Trellis attention library is normally loaded on first prefill.
+            from inkling_trellis.inkling2.moe_triton import ops as attention_ops
+            attention_ops()
+        self.fast_batch = bool(self.n_slots > 1 and self.native_prep and self.arbitrary_rows
+                               and hasattr(torch.ops.inkling2_xpu, "batch_xmx")
+                               and hasattr(torch.ops.inkling_prep, "output_conv"))
+        if self.trace_batch:
+            logging.getLogger(__name__).warning("Inkling native ragged XMX batching enabled=%s", self.fast_batch)
         if self.want_dspark:
             from .dspark import InklingDraft
-            self.draft = InklingDraft(self.checkpoint, device, self.max_context)
+            self.draft = InklingDraft(self.checkpoint, device, self.max_context, grow_global=self.n_slots > 1)
             self.draft.bind_target_head(self.lm_q8)
+            self.drafts = [self.draft, *(self.draft.fork() for _ in range(self.n_slots - 1))]
+            self.draft_lengths = [0] * self.n_slots
 
     def embed_input_ids(self, input_ids):
         return self.get_input_embeddings()(input_ids)
@@ -159,12 +183,16 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
     def _decode_global(self, visit, q, k, v, pos, rel, proj, sink, batch):
         key_cache, value_cache = self._pages(visit, batch)
         self._store_kv(key_cache, value_cache, k, v, batch.out_cache_loc)
-        if self.use_paged_xmx and key_cache.dtype == torch.float8_e4m3fn and self.page_tokens % 16 == 0:
+        if self.batch_layout is not None:
+            return batch_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
+                             paged_splits(batch.total_tokens, self.batch_layout[2]), self.batch_layout,
+                             local=False, packed=self.packed_kv)
+        if batch.block_table.shape[0] == 1 and self.use_paged_xmx and key_cache.dtype == torch.float8_e4m3fn and self.page_tokens % 16 == 0:
             return paged_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens,
                              pos, rel, proj, sink, paged_splits(batch.total_tokens, q.shape[0]), self.packed_kv)
         splits = min(64, max(8, (batch.total_tokens + 1023) // 1024))
         return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
-                            queries_per_request=q.shape[0], num_splits=splits)
+                            queries_per_request=self._st_nq, num_splits=splits)
 
     def _control_norm(self, il, module, cur, msg, weight):
         if self.prefill_controller and not self._static and cur.shape[0] > 8:
@@ -176,18 +204,38 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         return super()._control_norm(il, module, cur, msg, weight)
 
     def _conv(self, vi, name, x, weight, dynamic, reqs, pos):
+        if self.batch_layout is not None:
+            if dynamic is not None or name not in ("mlp_out", "attn_out"):
+                raise RuntimeError("The batched preparation kernel owns K/V convolutions")
+            return torch.ops.inkling_prep.output_conv(x.float().contiguous(), weight, self.conv[vi], self.conv_pos, pos,
+                                                      *self._prep_layout, self.conv_ch[name][0])
         use_prefill_conv = self.prefill_output_conv if name in ("attn_out", "mlp_out") else self.prefill_kv_conv
         if use_prefill_conv and not self._static:
             from .prefill_kernels import prefill_conv
-            slot, _, _, start = reqs[0]
             offset, _ = self.conv_ch[name]
-            return prefill_conv(x, weight, self.conv[vi, slot], self.conv_pos[slot], start, offset, dynamic)
+            outputs = []
+            for slot, first, count, start in reqs:
+                rows = slice(first, first + count)
+                outputs.append(prefill_conv(x[rows], weight, self.conv[vi, slot], self.conv_pos[slot],
+                                            start, offset, None if dynamic is None else dynamic[rows]))
+            return outputs[0] if len(outputs) == 1 else torch.cat(outputs)
         return super()._conv(vi, name, x, weight, dynamic, reqs, pos)
 
     def _prefill_global(self, visit, q, k, v, table, sink, reqs, batch):
         key_cache, value_cache = self._pages(visit, batch)
         self._store_kv(key_cache, value_cache, k, v, batch.out_cache_loc)
 
+        if len(reqs) == 1:
+            return [self._attend_prefix(q, k, v, table, sink, batch, key_cache, value_cache)]
+        outputs = []
+        for index, (_, first, count, start) in enumerate(reqs):
+            rows = slice(first, first + count)
+            one = self._request_batch(batch, index, rows, start, count)
+            outputs.append(self._attend_prefix(q[rows], k[rows], v[rows], table[rows], sink[rows],
+                                               one, key_cache, value_cache))
+        return outputs
+
+    def _attend_prefix(self, q, k, v, table, sink, batch, key_cache, value_cache):
         def read_kv(start, end):
             page_start = start // self.page_tokens
             page_end = (end + self.page_tokens - 1) // self.page_tokens
@@ -207,24 +255,25 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             if self.prefill_prefix_io and not self.packed_kv:
                 from .prefix_io import read_heads as gather_heads
                 read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0])
-            return [hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
+            return hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
                                    self.prefix_block, read_kv, split_alignment=self.page_tokens if self.tight_prefix else None,
-                                   read_heads=read_heads)]
+                                   read_heads=read_heads)
         else:
             keys, values = read_kv(0, batch.total_tokens)
-        return [attention_prefill_esimd(q, keys, values, batch.first_position, 0, table, sink, qtw=4)]
+        return attention_prefill_esimd(q, keys, values, batch.first_position, 0, table, sink, qtw=4)
 
     def _metadata(self, size, device):
         metadata = get_forward_context().attn_metadata
         if metadata is not None:
             md = metadata[self.kv_layers[0].layer_name]
-            if md.seq_lens.numel() != 1 or md.num_actual_tokens != size:
-                raise ValueError("Inkling XPU requires one unpadded sequence per forward")
+            if md.num_actual_tokens != size or (self.inkling_batch is None and md.seq_lens.numel() != 1):
+                raise ValueError("Inkling XPU requires unpadded request metadata")
             self.page_tokens = self.kv_layers[0].kv_cache.shape[2]
-            total = int(md.seq_lens[0].item())
+            lengths = md.seq_lens.tolist()
+            total = max(lengths)
             return SimpleNamespace(caches=[layer.kv_cache for layer in self.kv_layers], block_table=md.block_table,
                                    seq_lens=md.seq_lens, out_cache_loc=md.slot_mapping[:size].long(),
-                                   total_tokens=total, first_position=total - size)
+                                   total_tokens=total, first_position=total - size, lengths=lengths)
 
         # Run the model during vLLM's memory profiling before it binds a KV arena.
         num_pages = (size + self.page_tokens - 1) // self.page_tokens
@@ -333,28 +382,180 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         size = positions.numel()
         positions = positions.long()
         batch = self._metadata(size, positions.device)
+        if self.n_slots > 1 and self.inkling_batch is not None:
+            return self._batch_forward(input_ids, positions, batch, inputs_embeds)
+        return self._single_forward(input_ids, positions, batch, inputs_embeds)
+
+    @contextmanager
+    def _single_slot(self, slot):
+        # The single-stream XMX kernels take contiguous, zero-based ring views.
+        keys, values, swa_pos = self.swa_k, self.swa_v, self.swa_pos
+        conv, conv_pos, graphs = self.conv, self.conv_pos, self.decode_graphs
+        ring = slice(slot * RING, (slot + 1) * RING)
+        self.swa_k, self.swa_v = keys[:, ring], values[:, ring]
+        self.swa_pos = swa_pos[slot:slot + 1]
+        self.conv, self.conv_pos = conv[:, slot:slot + 1], conv_pos[slot:slot + 1]
+        self.decode_graphs = self.slot_graphs[slot]
+        if self.want_dspark:
+            self.draft = self.drafts[slot]
+        history = self.slot_histories[slot]
+        self.ring_high, self.saved_frontier = history.high, history.frontier
+        self.saved_rings, self.saved_tail = history.rings, history.tail
+        try:
+            yield
+        finally:
+            history.high, history.frontier = self.ring_high, self.saved_frontier
+            history.rings, history.tail = self.saved_rings, self.saved_tail
+            self.swa_k, self.swa_v, self.swa_pos = keys, values, swa_pos
+            self.conv, self.conv_pos, self.decode_graphs = conv, conv_pos, graphs
+            if self.want_dspark:
+                self.draft = self.drafts[0]
+
+    def _batch_forward(self, ids, positions, batch, embeds):
+        owners, slots, offsets = self.inkling_batch
+        requests = [(int(slot), int(a), int(b - a), length - int(b - a))
+                    for slot, a, b, length in zip(slots, offsets[:-1], offsets[1:], batch.lengths, strict=True)]
+        if (offsets[-1] != positions.numel() or len(set(slots)) != len(slots)
+                or any(not 0 <= s < self.n_slots or n < 1 or start < 0 for s, _, n, start in requests)):
+            raise ValueError("Invalid request-to-ring mapping")
+        if self.want_dspark:
+            for slot, _, count, start in requests:
+                self.draft_lengths[slot] = start + count
+                if self.drafts[slot].reserve(start, start + count):
+                    self.slot_graphs[slot].clear()
+        is_decode = len(requests) > 1 and all(n == 1 and start > 0 for _, _, n, start in requests)
+        if self.trace_batch:
+            verify = self.fast_batch and len(requests) > 1 and all(
+                start > 0 and count <= 8 for _, _, count, start in requests)
+            signature = (len(requests), is_decode, verify)
+            if signature not in self.traced_shapes:
+                logging.getLogger(__name__).warning("Inkling forward joint_decode=%s native_verify=%s requests=%s layout=%s",
+                                                    is_decode, verify, owners, requests)
+                self.traced_shapes.add(signature)
+        if len(requests) == 1:
+            slot, first, count, start = requests[0]
+            one = self._request_batch(batch, 0, slice(0, count), start, count)
+            with self._single_slot(slot):
+                return self._single_forward(ids, positions, one, embeds)
+
+        restored = {}
+        for index, (slot, first, count, start) in enumerate(requests):
+            rows = slice(first, first + count)
+            one = self._request_batch(batch, index, rows, start, count)
+            if self.enable_ring_prefix:
+                with self._single_slot(slot):
+                    hidden = self._begin_history(ids[rows], embeds, one)
+                    if hidden is not None:
+                        restored[index] = hidden
+        if restored:
+            # Exact tail replays already own their outputs. Preserve their KV/rings.
+            results = []
+            for index, (slot, first, count, start) in enumerate(requests):
+                if index in restored:
+                    results.append(restored[index])
+                    continue
+                rows = slice(first, first + count)
+                one = self._request_batch(batch, index, rows, start, count)
+                with self._single_slot(slot):
+                    results.append(self._single_forward(ids[rows], positions[rows], one,
+                                   None if embeds is None else embeds[rows], history_ready=True))
+            return torch.cat(results)
+        if self.want_dspark:
+            from .dspark import BatchedDraftFeatures
+            self.active_draft = BatchedDraftFeatures(self.drafts, requests)
+        if self.fast_batch and all(start > 0 and count <= 8 for _, _, count, start in requests):
+            return self._verify_batch(ids, positions, batch, embeds, requests, offsets)
+        if is_decode and not self.packed_kv:
+            return self._joint_decode(ids, positions, batch, slots, embeds)
+
+        self._static = False
+        self._reqs = requests
+        self._conv_pos_update = []
+        self._prepare(batch, requests, positions, kv_pool=True)
+        hidden = self._forward_body(ids, positions, batch, requests, embeds, return_hidden=True)
+        if self.enable_ring_prefix:
+            for index, (slot, first, count, start) in enumerate(requests):
+                if count >= RingPrefix.min_snapshot_rows:
+                    rows = slice(first, first + count)
+                    one = self._request_batch(batch, index, rows, start, count)
+                    with self._single_slot(slot):
+                        self._snapshot(ids[rows], embeds, hidden[rows], one)
+        return hidden
+
+    @staticmethod
+    def _request_batch(batch, index, rows, start, count):
+        return SimpleNamespace(caches=batch.caches, block_table=batch.block_table[index:index + 1],
+                               seq_lens=batch.seq_lens[index:index + 1], out_cache_loc=batch.out_cache_loc[rows],
+                               total_tokens=start + count, first_position=start)
+
+    def _local_batch(self, q, k, v, pages, lengths, pos, rel, proj, sink):
+        return batch_xmx(q, k, v, pages, lengths, pos, rel, proj, sink, self._local_parts, self.batch_layout,
+                         local=True)
+
+    def _verify_batch(self, ids, positions, batch, embeds, requests, offsets):
+        slots = [slot for slot, _, _, _ in requests]
+        max_rows = max(n for _, _, n, _ in requests)
+        device = positions.device
+        row_slots = torch.tensor([s for s, _, n, _ in requests for _ in range(n)], device=device, dtype=torch.int32)
+        first_rows = torch.tensor([r for _, r, n, _ in requests for _ in range(n)], device=device, dtype=torch.int32)
+        tensors = (torch.tensor(offsets, dtype=torch.int32, device=device),
+                   torch.tensor(slots, dtype=torch.int32, device=device), row_slots, first_rows)
+        # The batch XMX kernel has two query-tile variants.
+        width = 2 if max_rows <= 2 else 8
+        if self.use_decode_graph and embeds is None:
+            return self.batch_graphs.run(self, ids, positions, batch, tensors, width)
+        return self._run_verify(ids, positions, batch, embeds, tensors, width)
+
+    @staticmethod
+    def _batch_splits(total, width):
+        # Keep long-context single-stream tuning separate from wide serving batches.
+        return paged_splits(total, width), local_splits(total, width)
+
+    def _run_verify(self, ids, positions, batch, embeds, tensors, width):
+        offsets, slots, row_slots, first_rows = tensors
+        layout = (offsets, slots, width)
+        single_local = self.local_xmx
+        self._static = True
+        self.batch_layout = layout
+        self._prep_layout = (row_slots, first_rows)
+        self._st_slot = row_slots.long()
+        _, self._local_parts = self._batch_splits(batch.total_tokens, width)
+        self.local_xmx = self._local_batch
+        try:
+            self.swa_pos[self._st_slot, positions.remainder(RING)] = positions.int()
+            self.conv_pos[self._st_slot, positions.remainder(CONV_RING)] = positions
+            return self._forward_body(ids, positions, batch, None, embeds, return_hidden=True)
+        finally:
+            self.local_xmx = single_local
+            self.batch_layout = None
+            self._prep_layout = ()
+
+    def _joint_decode(self, ids, positions, batch, slots, embeds):
+        self._static = True
+        self._st_nq = 1
+        self._st_req_slots = torch.tensor(slots, device=positions.device, dtype=torch.int32)
+        self._st_slot = self._st_req_slots.long()
+        self._st_pos = positions
+        self.swa_pos[self._st_slot, positions.remainder(RING)] = positions.int()
+        self.conv_pos[self._st_slot, positions.remainder(CONV_RING)] = positions
+        native_prep, local = self.native_prep, self.local_xmx
+        self.native_prep, self.local_xmx = None, None
+        try:
+            return self._forward_body(ids, positions, batch, None, embeds, return_hidden=True)
+        finally:
+            self.native_prep, self.local_xmx = native_prep, local
+
+    def _single_forward(self, input_ids, positions, batch, inputs_embeds, *, history_ready=False):
+        size = positions.numel()
         real_history = self.enable_ring_prefix and get_forward_context().attn_metadata is not None
         if self.want_dspark:
             self.active_draft = self.draft if get_forward_context().attn_metadata is not None else None
-            self.draft_end = batch.total_tokens
-        if real_history:
-            if (self.saved_tail is not None and inputs_embeds is None and input_ids is not None
-                    and batch.first_position > 0 and batch.first_position < self.ring_high
-                    and batch.total_tokens == self.saved_frontier and size >= RingPrefix.min_snapshot_rows):
-                # vLLM already matched the preceding block hashes (including salt).
-                # Compare the remaining IDs before restoring any request-owned data.
-                hidden = self.saved_tail.restore(input_ids, batch.out_cache_loc, self.page_tokens,
-                                                 batch.total_tokens, batch.caches, self._global_draft_caches())
-                if hidden is not None:
-                    self._restore_saved_rings()
-                    self.ring_high = batch.total_tokens
-                    return hidden
-            # A divergent branch invalidates the association between the saved
-            # outputs and the live request's prefix.
-            if batch.first_position < self.saved_frontier or batch.first_position == 0:
-                self.saved_tail = None
-            self._restore_history(batch.first_position)
-            self.ring_high = batch.total_tokens
+            if self.n_slots == 1:
+                self.draft_lengths[0] = batch.total_tokens
+        if real_history and not history_ready:
+            restored = self._begin_history(input_ids, inputs_embeds, batch)
+            if restored is not None:
+                return restored
         self._static = batch.first_position > 0 and (size in (1, 2, 4, 8) or self.arbitrary_rows and 1 <= size <= 8)
         if self._static:
             if self.use_decode_graph and size in self.capture_rows and inputs_embeds is None:
@@ -367,11 +568,36 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self._prepare(batch, reqs, positions, kv_pool=True)
         hidden = self._forward_body(input_ids, positions, batch, reqs, inputs_embeds, return_hidden=True)
         if real_history and size >= RingPrefix.min_snapshot_rows:
-            self._save_history(batch.total_tokens)
-            self.saved_tail = None
-            if inputs_embeds is None and input_ids is not None and not self.packed_kv:
-                n = min(RingPrefix.slack, size)
-                self.saved_tail = PrefillTail.capture(input_ids[-n:], hidden[-n:], batch.out_cache_loc[-n:],
-                                                     self.page_tokens, batch.total_tokens, batch.caches,
-                                                     self._global_draft_caches())
+            self._snapshot(input_ids, inputs_embeds, hidden, batch)
         return hidden
+
+    def _begin_history(self, input_ids, inputs_embeds, batch):
+        size = batch.total_tokens - batch.first_position
+        if (self.saved_tail is not None and inputs_embeds is None and input_ids is not None
+                and batch.first_position > 0 and batch.first_position < self.ring_high
+                and batch.total_tokens == self.saved_frontier and size >= RingPrefix.min_snapshot_rows):
+            # vLLM already matched the preceding block hashes (including salt).
+            # Compare the remaining IDs before restoring any request-owned data.
+            hidden = self.saved_tail.restore(input_ids, batch.out_cache_loc, self.page_tokens,
+                                             batch.total_tokens, batch.caches, self._global_draft_caches())
+            if hidden is not None:
+                self._restore_saved_rings()
+                self.ring_high = batch.total_tokens
+                return hidden
+        # A divergent branch invalidates the association between the saved
+        # outputs and the live request's prefix.
+        if batch.first_position < self.saved_frontier or batch.first_position == 0:
+            self.saved_tail = None
+        self._restore_history(batch.first_position)
+        self.ring_high = batch.total_tokens
+        return None
+
+    def _snapshot(self, input_ids, inputs_embeds, hidden, batch):
+        size = hidden.shape[0]
+        self._save_history(batch.total_tokens)
+        self.saved_tail = None
+        if inputs_embeds is None and input_ids is not None and not self.packed_kv:
+            n = min(RingPrefix.slack, size)
+            self.saved_tail = PrefillTail.capture(input_ids[-n:], hidden[-n:], batch.out_cache_loc[-n:],
+                                                 self.page_tokens, batch.total_tokens, batch.caches,
+                                                 self._global_draft_caches())

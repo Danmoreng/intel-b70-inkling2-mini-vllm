@@ -174,6 +174,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library")
     parser.add_argument("--fused-bias", action="store_true")
+    parser.add_argument("--batch", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(2)
     torch.manual_seed(2026)
@@ -191,6 +192,9 @@ def main():
     check_hybrid_prefill()
     if args.fused_bias:
         check_fused_bias()
+    if args.batch:
+        from check_batch_xmx import check as check_batch
+        check_batch()
     torch.xpu.synchronize()
     print("PASS: 16 block-table cases, 1 legacy table case, 3 prefill cases and both MoE formats", flush=True)
 

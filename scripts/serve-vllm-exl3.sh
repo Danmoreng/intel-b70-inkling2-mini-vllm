@@ -6,6 +6,8 @@ context=${1:?context length}
 shift
 port=${INKLING2_VLLM_PORT:-8093}
 batch=${INKLING2_VLLM_BATCH:-128}
+slots=${INKLING2_MAX_SEQS:-1}
+case "$slots" in [1-4]) ;; *) echo "INKLING2_MAX_SEQS must be 1 through 4" >&2; exit 2 ;; esac
 kv_type=${INKLING2_VLLM_KV_TYPE:-bfloat16}
 runtime=${INKLING2_RUNTIME:-sha256:131dd9e11809de2f3136547618f130ee238f0b90cd5718567bcdd0dad5360e19}
 render_node=$(readlink -f -- "${INKLING2_RENDER_NODE:-/dev/dri/by-path/pci-0000:03:00.0-render}")
@@ -59,7 +61,7 @@ check_vendor_patch() {
     git -C "$vendor" diff -- "$source_file" | cmp - "$patch_file"
 }
 check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
-    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588
+    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588 e30e35e03f57f17cffcc585f14ccab74839952db47c8effaea4d86d5fb6bfa70
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
 check_vendor_patch xpu/exl3xpu/inkling2/vendor/inkling2_vision.py trellis-inkling-vision-qkv.patch
 
@@ -146,7 +148,7 @@ if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
     if [[ ${INKLING2_REASONING_BUDGET:-0} == 1 ]]; then
         budget_library=/lab/.work/build/inkling2-reasoning-budget.so
         test -s "${budget_library#/lab/}" || { echo 'Build the coding kernels with scripts/build-loop-control.sh.' >&2; exit 1; }
-        budget_files=(v1/worker/gpu/sample/{sampler,thinking_budget}.py)
+        budget_files=(v1/worker/gpu/sample/{sampler,thinking_budget}.py v1/worker/gpu/spec_decode/rejection_sampler.py)
         docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${budget_files[@]}" | tar -xf - -C "$work/text-renderer"
         patch --silent --batch --forward --fuzz=0 -d "$work/text-renderer" -p1 < patches/vllm-inkling-cumulative-thinking.patch
         for file in "${budget_files[@]}"; do
@@ -165,7 +167,27 @@ if [[ ${INKLING2_RING_PREFIX:-0} == 1 ]]; then
     docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "$file" | tar -xf - -C "$work/ring-prefix"
     patch --silent --batch --forward --fuzz=0 -d "$work/ring-prefix" -p1 < patches/vllm-single-slot-ring-prefix.patch
     spec_mounts+=(--mount "type=bind,source=$work/ring-prefix/$file,target=$base/$file,readonly")
+    if (( slots > 1 )); then
+        scheduler_files=(v1/core/sched/scheduler.py v1/core/sched/output.py)
+        docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${scheduler_files[@]}" | tar -xf - -C "$work/ring-prefix"
+        patch --silent --batch --forward --fuzz=0 -d "$work/ring-prefix" -p1 < patches/vllm-inkling-batch-prefix.patch
+        for file in "${scheduler_files[@]}"; do
+            spec_mounts+=(--mount "type=bind,source=$work/ring-prefix/$file,target=$base/$file,readonly")
+        done
+    fi
     prefix_args=(--enable-prefix-caching --no-async-scheduling)
+fi
+
+if (( slots > 1 )); then
+    base=/opt/venv/lib/python3.12/site-packages/vllm
+    runner=v1/worker/gpu/model_runner.py
+    mkdir -p "$work/v2"
+    if [[ ${INKLING2_VLLM_DSPARK:-0} != 1 ]]; then
+        docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "$runner" | tar -xf - -C "$work/v2"
+        spec_mounts+=(--mount "type=bind,source=$work/v2/$runner,target=$base/$runner,readonly")
+    fi
+    patch --silent --batch --forward --fuzz=0 -d "$work/v2" -p1 < patches/vllm-inkling-batch-runner.patch
+    if [[ ${INKLING2_RING_PREFIX:-0} != 1 ]]; then prefix_args+=(--no-async-scheduling); fi
 fi
 
 cid_dir=$(mktemp -d)
@@ -184,7 +206,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --mount "type=bind,source=$PWD,target=/lab,readonly" \
     "${spec_mounts[@]}" "${cache_mounts[@]}" \
     --env PYTHONPATH=/lab:/lab/.work/python:/lab/.work/vllm-inkling/plugin \
-    --env "INKLING2_VISION=${INKLING2_VISION:-0}" \
+    --env "INKLING2_MAX_SEQS=$slots" --env INKLING2_TRACE_BATCH --env "INKLING2_VISION=${INKLING2_VISION:-0}" \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
     --env "INKLING2_EXL3_SHARED_INPUT=${INKLING2_EXL3_SHARED_INPUT:-1}" \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
@@ -239,6 +261,6 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --entrypoint /opt/venv/bin/vllm "$runtime" serve /lab/models/exl3 \
     --hf-config-path /lab/.work/vllm-inkling/config --tokenizer /lab/models/exl3 \
     --served-model-name inkling2-mini-exl3-b70 --generation-config vllm --load-format safetensors \
-    --host 127.0.0.1 --port "$port" --max-model-len "$context" --max-num-seqs 1 \
+    --host 127.0.0.1 --port "$port" --max-model-len "$context" --max-num-seqs "$slots" \
     --max-num-batched-tokens "$batch" --gpu-memory-utilization 0.90 \
     --dtype bfloat16 --kv-cache-dtype "$kv_type" "${prefix_args[@]}" --enforce-eager "${spec_args[@]}" "$@"

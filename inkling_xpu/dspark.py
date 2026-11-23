@@ -1,5 +1,6 @@
-"""Batch-one Inkling 2 Mini DSpark for the Intel XPU target and vLLM V2 runner."""
+"""Inkling 2 Mini DSpark for the Intel XPU target and vLLM V2 runner."""
 
+from copy import copy
 import json
 import os
 
@@ -21,7 +22,7 @@ def norm(x, weight):
 
 
 class InklingDraft:
-    def __init__(self, checkpoint, device, max_context):
+    def __init__(self, checkpoint, device, max_context, *, grow_global=False):
         config = json.loads((checkpoint / "config.json").read_text())
         self.config = config["mtp_config"]
         self.width = self.config["hidden_size"]
@@ -67,6 +68,8 @@ class InklingDraft:
         else:
             self.draft_mix_norm = None
         self.warmed = set()
+        self.max_context = max_context
+        self.grow_global = grow_global
         self.kv = []
         self.capacities = []
         slack = 64 if os.environ.get("INKLING2_RING_PREFIX", "0") == "1" else self.block * 2
@@ -81,6 +84,8 @@ class InklingDraft:
                 self.w[p + group] = torch.cat([self.w.pop(p + stem + ".weight") for stem in stems])
             length = self.window + slack if index in self.local else max_context
             self.capacities.append(length if index in self.local else 0)
+            if grow_global and index not in self.local:
+                length = min(max_context, 4096)
             rows = (
                 (2 * length if index in self.local else length + self.block)
                 if self.split_attention
@@ -113,6 +118,40 @@ class InklingDraft:
         self.recurrent, self.context = (
             v.contiguous() for v in weight.split([2 * self.rank, 2 * self.width], dim=1)
         )
+
+    def fork(self):
+        """Share read-only weights. Each request slot owns its KV and recurrent state."""
+        other = copy(self)
+        other.kv = [torch.empty_like(cache) for cache in self.kv]
+        other.f_ring = torch.empty_like(self.f_ring)
+        other.warmed = set()
+        other.graph_state = None
+        return other
+
+    def reserve(self, start, end):
+        """Grow global draft KV as a slot advances and release surplus on cold reuse."""
+        if not self.grow_global:
+            return False
+        changed = False
+        for i, cache in enumerate(self.kv):
+            if i in self.local:
+                continue
+            pad = self.block if self.split_attention else 0
+            pages = max(1, (end + 4095) // 4096)
+            capacity = min(self.max_context, 4096 * (1 << (pages - 1).bit_length()))
+            rows = capacity + pad
+            if self.fp8_global:
+                rows = (rows + 15) // 16 * 16
+            if cache.size(1) < end + pad or (start == 0 and cache.size(1) > rows * 2):
+                new = cache.new_empty((2, rows, self.groups, self.head))
+                if start:
+                    # Packed FP8 tiles interleave bytes from sixteen positions.
+                    keep = (start + 15) // 16 * 16 if self.fp8_global else start
+                    new[:, :keep].copy_(cache[:, :keep])
+                self.kv[i] = new
+                self.graph_state = None
+                changed = True
+        return changed
 
     def bind_target_head(self, head):
         if self.shared_head:
@@ -219,26 +258,35 @@ class InklingDraft:
             self.graph_checks += 1
         return output
 
-    def _block(self, target, anchor, start, steps, splits):
-        positions = self.offsets + start
+    def _block(self, target, anchor, start, steps, splits, drafts=None, sampling=None):
+        batch_size = anchor.numel()
+        if drafts is None:
+            positions = self.offsets + start
+            x = torch.cat([target.get_input_embeddings()(anchor).to(torch.bfloat16),
+                           self.w["mask_embed"].expand(self.block - 1, -1)])
+        else:
+            positions = (start[:, None] + self.offsets).flatten()
+            x = torch.cat([target.get_input_embeddings()(anchor).to(torch.bfloat16)[:, None],
+                           self.w["mask_embed"].expand(batch_size, self.block - 1, -1)], dim=1).flatten(0, 1)
         rotation = self.rotation(positions)
-        x = torch.cat(
-            [
-                target.get_input_embeddings()(anchor).to(torch.bfloat16),
-                self.w["mask_embed"].expand(self.block - 1, -1),
-            ]
-        )
         for i, kv in enumerate(self.kv):
             p = f"layers.{i}."
             h = norm(x, self.w[p + "input_layernorm.weight"])
             q, k, v = (
                 F.linear(h, self.w[p + "self_attn.qkv"])
-                .view(self.block, -1, self.head)
+                .view(batch_size * self.block, -1, self.head)
                 .split([self.heads, self.groups, self.groups], dim=1)
             )
             q = self.rotate(norm(q, self.w[p + "self_attn.q_norm.weight"]), rotation)
             k = self.rotate(norm(k, self.w[p + "self_attn.k_norm.weight"]), rotation)
-            if self.split_attention:
+            if drafts is not None:
+                outputs = []
+                for row, draft in enumerate(drafts):
+                    span = slice(row * self.block, (row + 1) * self.block)
+                    outputs.append(draft.attend_block(i, q[span], k[span], v[span], positions[span],
+                                                      start[row:row + 1], splits))
+                h = torch.cat(outputs)
+            elif self.split_attention:
                 h = self.attend_block(i, q, k, v, positions, start, splits)
             else:
                 if i in self.local:
@@ -268,75 +316,87 @@ class InklingDraft:
                 )
             else:
                 x = x + F.linear(F.silu(gate) * up, self.w[p + "mlp.down_proj.weight"])
-        hidden = norm(x[1 : steps + 1], self.w["norm.weight"])
+        hidden = norm(x.view(batch_size, self.block, -1)[:, 1:steps + 1].reshape(-1, self.width),
+                      self.w["norm.weight"])
         if self.q8_head is None:
             base = F.linear(hidden, self.lm).float()
         else:
-            base = self.q8_head(hidden)[:, : self.vocab]
-        f_rnn = self.f_ring[(start - 1) % self.f_ring.size(0)].expand(len(hidden), -1)
-        context = F.linear(
-            torch.cat([hidden, f_rnn], dim=1).float(),
-            self.context,
-            self.w["markov_head.rnn_proj.bias"].float(),
-        )
+            base = self.q8_head(hidden)[:, :self.vocab]
+        if drafts is None:
+            recurrent = self.f_ring[(start - 1) % self.f_ring.size(0)].reshape(1, self.width)
+            sampling = self.sampling
+        else:
+            recurrent = torch.cat([d.f_ring[(start[r:r + 1] - 1) % d.f_ring.size(0)]
+                                   for r, d in enumerate(drafts)])
+        f_rnn = recurrent[:, None].expand(-1, steps, -1).reshape_as(hidden)
+        context = F.linear(torch.cat([hidden, f_rnn], dim=1).float(), self.context,
+                           self.w["markov_head.rnn_proj.bias"].float()).view(batch_size, steps, -1)
+        base = base.view(batch_size, steps, -1)
         if self.shortlist:
             base, indices = base.topk(self.shortlist, dim=-1)
             folded = F.embedding(indices, self.fold).float()
             biases = self.bias[indices]
-        state = hidden.new_zeros((1, self.rank))
+        state = hidden.new_zeros((batch_size, self.rank))
         prev = anchor
-        steps = []
-        for i in range(len(hidden)):
+        proposals = []
+        for i in range(steps):
             token = F.embedding(prev, self.w["markov_head.markov_w1.weight"])
-            raw = F.linear(torch.cat([state, token], dim=-1).float(), self.recurrent) + context[i]
+            raw = F.linear(torch.cat([state, token], dim=-1).float(), self.recurrent) + context[:, i]
             gate, candidate, latent = raw.to(torch.bfloat16).chunk(3, -1)
             gate = gate.sigmoid()
             state = gate * state + (1 - gate) * candidate.tanh()
             if self.shortlist:
-                correction = (folded[i] @ latent.tanh().float().T).T + biases[i]
+                if batch_size == 1:
+                    correction = (folded[0, i] @ latent.tanh().float().T).T + biases[:, i]
+                else:
+                    correction = torch.bmm(folded[:, i], latent.tanh().float().unsqueeze(-1)).squeeze(-1) + biases[:, i]
+            elif self.reference_math:
+                correction = F.linear(latent.tanh().float(), self.fold.float()).float() + self.bias
             else:
-                correction = (
-                    F.linear(latent.tanh().float(), self.fold.float()).float() + self.bias
-                    if self.reference_math
-                    else (F.linear(latent.tanh(), self.fold).float() + self.bias)
-                )
+                correction = F.linear(latent.tanh(), self.fold).float() + self.bias
             if self.reference_math:
-                combined = (base[i] + correction.to(torch.bfloat16).float()).to(torch.bfloat16)
+                combined = (base[:, i] + correction.to(torch.bfloat16).float()).to(torch.bfloat16)
                 logits = (self.cap * torch.tanh(combined.float() / self.cap)).to(torch.bfloat16)
             else:
-                logits = self.cap * torch.tanh((base[i] + correction) / self.cap)
-            if self.sampling is not None:
-                # Rejection compares p and q in the target vocabulary. Retain
-                # the exact pre-temperature proposal logits, including zero
-                # probability outside this step's candidate set.
-                ids = indices[i] if self.shortlist else None
-                prev = self.sampling.sample(logits, ids, start + i, i)
+                logits = self.cap * torch.tanh((base[:, i] + correction) / self.cap)
+            ids = indices[:, i] if self.shortlist else None
+            if sampling is not None:
+                prev = sampling.sample(logits, ids, start + i, i)
+            elif self.shortlist:
+                prev = torch.where(logits == logits.amax(-1, keepdim=True), ids, self.vocab).amin(-1)
             else:
-                if self.shortlist:
-                    prev = torch.where(logits == logits.amax(-1, keepdim=True), indices[i], self.vocab).amin(
-                        -1
-                    )
-                else:
-                    prev = logits.argmax(dim=-1)
-            steps.append(prev)
-        if self.sampling is not None and self.sampling.adaptive:
-            # A low-confidence token may be offered, but no subsequent token is.
-            keep = self.sampling.confidence[0] >= 0.75
-            for i in range(1, len(steps)):
-                steps[i] = torch.where(keep, steps[i], -1)
-                keep = keep & (self.sampling.confidence[i] >= 0.75)
-        return torch.stack(steps, dim=1)
+                prev = logits.argmax(dim=-1)
+            proposals.append(prev)
+        if sampling is not None and sampling.adaptive:
+            keep = sampling.confidence[0] >= 0.75
+            for i in range(1, steps):
+                proposals[i] = torch.where(keep, proposals[i], -1)
+                keep = keep & (sampling.confidence[i] >= 0.75)
+        return torch.stack(proposals, dim=1)
+
+
+class BatchedDraftFeatures:
+    def __init__(self, drafts, requests):
+        self.drafts = drafts
+        self.requests = requests
+        self.taps = drafts[0].taps
+
+    def store(self, features, positions):
+        for slot, first, count, _ in self.requests:
+            rows = slice(first, first + count)
+            self.drafts[slot].store([f[rows] for f in features], positions[rows])
 
 
 class DraftSampling:
     """Use vLLM's position-keyed draft RNG and its matching rejection sampler."""
 
-    def __init__(self, width, vocab, device, fp64):
-        self.logits = torch.full((1, width, vocab), -float("inf"), device=device, dtype=torch.float32)
+    def __init__(self, width, logits, device, fp64):
+        self.logits = logits
+        vocab = logits.shape[-1]
         self.adaptive = os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
         self.confidence = [None] * width if self.adaptive else []
-        self.temperature = torch.zeros(1, device=device)
-        self.seed = torch.zeros(1, dtype=torch.int64, device=device)
+        self.temperature = torch.zeros(logits.size(0), device=device)
+        self.seed = torch.zeros(logits.size(0), dtype=torch.int64, device=device)
         self.slot = torch.zeros_like(self.seed)
         self.columns = [torch.tensor(i, dtype=torch.int32, device=device) for i in range(width)]
         self.fp64 = fp64
@@ -349,21 +409,22 @@ class DraftSampling:
 
         if 0 < self.topk < values.shape[-1]:
             values, indices = values.topk(self.topk, dim=-1)
-            ids = indices[0] if ids is None else ids[indices[0]]
+            ids = indices if ids is None else ids.gather(1, indices)
         if self.adaptive:
-            scaled = values.float() / self.temperature.clamp_min(0.01)
+            scaled = values.float() / self.temperature[self.slot].clamp_min(0.01)[:, None]
             self.confidence[step] = scaled.softmax(-1).amax(-1)
         if ids is not None:
-            full = torch.full_like(self.logits[:, step], -float("inf"))
-            full.scatter_(1, ids.reshape(1, -1), values.float().reshape(1, -1))
+            full = torch.full((values.size(0), self.logits.size(-1)), -float("inf"),
+                              dtype=torch.float32, device=values.device)
+            full.scatter_(1, ids, values.float())
         else:
-            full = values.float().reshape(1, -1)
+            full = values.float()
         return gumbel_sample(
             full,
             self.slot,
             self.temperature,
             self.seed,
-            position.reshape(1),
+            torch.as_tensor(position, device=values.device).reshape(-1),
             apply_temperature=True,
             is_drafting=True,
             logits_cache=self.logits,
@@ -378,15 +439,62 @@ class InklingDSparkSpeculator(BaseSpeculator):
 
     def __init__(self, config, device):
         self.width = config.speculative_config.num_speculative_tokens
-        if not 1 <= self.width < 8 or config.scheduler_config.max_num_seqs != 1:
-            raise ValueError("Inkling DSpark supports one sequence and between one and seven proposals")
-        self.empty = torch.zeros(1, self.width, device=device, dtype=torch.long)
-        self.sampling = None
+        if not 1 <= self.width < 8 or not 1 <= config.scheduler_config.max_num_seqs <= 4:
+            raise ValueError("Inkling DSpark supports up to four sequences and between one and seven proposals")
+        slots = config.scheduler_config.max_num_seqs
+        self.empty = torch.zeros(slots, self.width, device=device, dtype=torch.long)
+        self.no_proposals = torch.full_like(self.empty, -1)
+        self.samplers = []
+        self.joint_sampling = None
+        self.joint_graphs = {}
+        self.joint_warm = set()
         if config.speculative_config.draft_sample_method == "probabilistic":
-            self.sampling = DraftSampling(
-                self.width, config.model_config.get_vocab_size(), device, config.model_config.use_fp64_gumbel
-            )
-            self.draft_logits = self.sampling.logits
+            vocab = config.model_config.get_vocab_size()
+            self.draft_logits = torch.full((slots, self.width, vocab), -float("inf"), device=device, dtype=torch.float32)
+            self.joint_sampling = DraftSampling(self.width, self.draft_logits, device,
+                                                config.model_config.use_fp64_gumbel)
+            self.samplers = [
+                DraftSampling(self.width, self.draft_logits[i:i + 1], device, config.model_config.use_fp64_gumbel)
+                for i in range(slots)
+            ]
+
+    def _propose_batch(self, slots, worker_slots, starts, last_sampled, temperature, seeds):
+        # Stable ring order keeps a graph usable after vLLM reorders its batch.
+        order = sorted(range(len(slots)), key=slots.__getitem__)
+        perm = torch.tensor(order, device=starts.device)
+        indices = worker_slots[perm].long()
+        starts = starts[perm].contiguous()
+        anchor = last_sampled[indices].reshape(-1).long()
+        drafts = [self.target.drafts[slots[r]] for r in order]
+        upper = max(self.target.draft_lengths[slots[r]] for r in order)
+        splits = min(512, max(16, 1 << max(0, (max(upper, 1) - 1).bit_length() - 7)))
+        sample = self.joint_sampling
+        if sample is not None:
+            sample.seed.copy_(seeds[:len(self.samplers)])
+            sample.temperature.copy_(temperature[:len(self.samplers)])
+        key = tuple(slots[r] for r in order)
+        signature = (splits, tuple((k.data_ptr(), k.size(1)) for d in drafts for k in d.kv))
+        def forward(ids, pos, mapping):
+            if sample is not None:
+                sample.slot = mapping
+            return drafts[0]._block(self.target, ids, pos, self.width, splits, drafts, sample)
+        if not drafts[0].graph_enabled or (key, splits) not in self.joint_warm:
+            self.joint_warm.add((key, splits))
+            out = forward(anchor, starts, indices)
+        else:
+            state = self.joint_graphs.get(key)
+            if state is None or state[0] != signature:
+                buffers = tuple(t.clone() for t in (anchor, starts, indices))
+                graph = torch.xpu.XPUGraph()
+                with torch.xpu.graph(graph):
+                    out = forward(*buffers)
+                state = (signature, graph, buffers, out)
+                self.joint_graphs[key] = state
+            _, graph, buffers, out = state
+            for buf, t in zip(buffers, (anchor, starts, indices), strict=True):
+                buf.copy_(t)
+            graph.replay()
+        return out[perm.argsort()]
 
     def init_cudagraph_manager(self, cudagraph_mode):
         pass
@@ -414,15 +522,47 @@ class InklingDSparkSpeculator(BaseSpeculator):
     ):
         if dummy_run or is_profile or not input_batch.num_reqs:
             return self.empty[: input_batch.num_reqs]
-        if self.sampling is not None:
-            self.target.draft.sampling = self.sampling
-            self.sampling.temperature.copy_(temperature[input_batch.idx_mapping[:1]])
-            self.sampling.seed.copy_(seeds[input_batch.idx_mapping[:1]])
-        upper = self.target.draft_end
-        if self.target.draft.split_attention:
-            start = input_batch.seq_lens[:1].int() - num_rejected[:1].int()
+        slots = self.target.inkling_batch[1] if self.target.n_slots > 1 else (0,)
+        count = input_batch.num_reqs
+        starts = input_batch.seq_lens[:count].int() - num_rejected[:count].int()
+        worker_indices = input_batch.idx_mapping_np
+        worker_slots = input_batch.idx_mapping
+        selected = None
+        if input_batch.has_prefill:
+            # A non-final chunk has no sampled anchor. Leave that request's
+            # proposal rows empty while its neighbours continue drafting.
+            complete = (input_batch.num_computed_prefill_tokens_np + input_batch.num_scheduled_tokens
+                        >= input_batch.prefill_len_np)
+            if not complete.all():
+                rows = complete.nonzero()[0]
+                if not len(rows):
+                    return self.no_proposals[:count]
+                selected = torch.as_tensor(rows, device=starts.device)
+                slots = [slots[i] for i in rows]
+                worker_indices = worker_indices[rows]
+                worker_slots = worker_slots[selected]
+                starts = starts[selected]
+        if len(slots) > 1 and self.target.drafts[0].split_attention:
+            result = self._propose_batch(slots, worker_slots, starts, last_sampled, temperature, seeds)
         else:
-            start = upper - int(num_rejected[0].item())
-        anchor = last_sampled[input_batch.idx_mapping[:1]].reshape(1).long()
-        draft = self.target.draft
-        return draft.propose(self.target, anchor, start, self.width, upper)
+            result = self._propose_separately(slots, worker_indices, starts, last_sampled, temperature, seeds)
+        if selected is None:
+            return result
+        return self.no_proposals[:count].index_copy(0, selected, result)
+
+    def _propose_separately(self, slots, worker_indices, starts, last_sampled, temperature, seeds):
+        proposals = []
+        for i, (slot, worker_idx) in enumerate(zip(slots, worker_indices, strict=True)):
+            draft = self.target.drafts[slot]
+            if self.samplers:
+                sampler = self.samplers[worker_idx]
+                if draft.sampling is not sampler:
+                    draft.graph_state = None
+                    draft.sampling = sampler
+                sampler.temperature.copy_(temperature[worker_idx:worker_idx + 1])
+                sampler.seed.copy_(seeds[worker_idx:worker_idx + 1])
+            upper = self.target.draft_lengths[slot]
+            start = starts[i:i + 1] if draft.split_attention else int(starts[i].item())
+            anchor = last_sampled[worker_idx].reshape(1).long()
+            proposals.append(draft.propose(self.target, anchor, start, self.width, upper))
+        return proposals[0] if len(proposals) == 1 else torch.cat(proposals)

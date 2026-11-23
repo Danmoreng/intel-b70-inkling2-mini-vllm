@@ -22,7 +22,7 @@
 +
 +        # Inkling may emit several thinking messages in one model response.
 +        self.inkling_state = None
-+        if (self.max_num_reqs == 1 and isinstance(eos_token_id, int)
++        if (isinstance(eos_token_id, int)
 +                and reasoning_config.reasoning_start_str == "<|content_thinking|>"
 +                and reasoning_config.reasoning_end_str == "<|end_message|>"
 +                and len(start_ids) == 1 and len(end_ids) == 1 and end_ids == natural_end_ids):
@@ -42,24 +42,34 @@
              self.cached_last_start.index_fill_(0, idx, -1)
              self.cached_last_end.index_fill_(0, idx, -1)
              self.cached_scan_pos.index_fill_(0, idx, 0)
-@@ -113,6 +128,20 @@
-     def apply(self, logits: torch.Tensor, ctx: LogitsContext) -> None:
+@@ -110,9 +125,29 @@
+             self.thinking_token_budget.copy_to_uva()
+             self._budget_dirty = False
+ 
+-    def apply(self, logits: torch.Tensor, ctx: LogitsContext) -> None:
++    def apply(self, logits: torch.Tensor, ctx: LogitsContext, cu_num_logits_np: np.ndarray | None = None) -> None:
          idx_mapping_np = ctx.idx_mapping_np
          if not self.enabled or not np.any(self.use_thinking_budget[idx_mapping_np]):
 +            return
 +
 +        if self.inkling_state is not None:
-+            slot = int(idx_mapping_np[0])
-+            budget = int(self.thinking_token_budget.np[slot])
-+            # Even a prompt that ends mid-thought cannot spend more than the
-+            # total visible sequence. The first active step scans its history.
-+            if int(ctx.seq_lens_upper_bound_np[0]) < budget:
++            budgets = self.thinking_token_budget.np[idx_mapping_np]
++            active = self.use_thinking_budget[idx_mapping_np] & (ctx.seq_lens_upper_bound_np >= budgets)
++            if not np.any(active):
 +                return
-+            torch.ops.inkling2_xpu.thinking_budget(
-+                logits, self.req_states.all_token_ids.gpu, self.req_states.total_len.gpu,
-+                ctx.input_ids, self.inkling_state, slot, int(self.req_states.prompt_len.np[slot]),
-+                budget, self.inkling_start, self.inkling_end, self.inkling_eos,
-+            )
++            # Rejection sampling passes its chunk-relative offsets from the
++            # host InputBatch. Ordinary sampling has one logits row per request.
++            boundaries = cu_num_logits_np if cu_num_logits_np is not None else range(len(idx_mapping_np) + 1)
++            if boundaries[-1] != logits.shape[0]:
++                raise ValueError("Thinking budget requires exact per-request logits boundaries")
++            for row in np.flatnonzero(active):
++                slot = int(idx_mapping_np[row])
++                span = slice(boundaries[row], boundaries[row + 1])
++                torch.ops.inkling2_xpu.thinking_budget(
++                    logits[span], self.req_states.all_token_ids.gpu, self.req_states.total_len.gpu,
++                    ctx.input_ids[span], self.inkling_state, slot, int(self.req_states.prompt_len.np[slot]),
++                    int(budgets[row]), self.inkling_start, self.inkling_end, self.inkling_eos,
++                )
              return
  
          apply_thinking_budget(
@@ -74,3 +84,46 @@
          )
          self.trace_replay_state = (
              TraceReplayState(req_states) if enable_trace_replay else None
+@@ -234,6 +234,7 @@
+         expanded_local_pos: torch.Tensor,
+         seq_lens_upper_bound_np: np.ndarray,
+         skip_top_k_top_p: bool = False,
++        cu_num_logits_np: np.ndarray | None = None,
+     ) -> torch.Tensor:
+         if not np.any(self.needs_logits_processing[idx_mapping_np]):
+             return logits
+@@ -257,7 +258,7 @@
+ 
+         # Forcing runs last so no stage can overwrite the forced end marker
+         # or weaken it by scaling.
+-        self.thinking_budget_state.apply(logits, ctx)
++        self.thinking_budget_state.apply(logits, ctx, cu_num_logits_np)
+ 
+         # Apply temperature in place.
+         self.sampling_states.apply_temperature(
+--- a/v1/worker/gpu/spec_decode/rejection_sampler.py
++++ b/v1/worker/gpu/spec_decode/rejection_sampler.py
+@@ -260,6 +260,7 @@
+         expanded_local_pos: torch.Tensor,
+         seq_lens_upper_bound_np: np.ndarray,
+         verify_draft_sampled: torch.Tensor,
++        cu_num_logits_np: np.ndarray,
+     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+         processed_logits = self.sampler.apply_sampling_params(
+             logits,
+@@ -270,6 +271,7 @@
+             draft_sampled,
+             expanded_local_pos,
+             seq_lens_upper_bound_np,
++            cu_num_logits_np=cu_num_logits_np,
+         )
+         sampled, num_sampled = rejection_sample(
+             processed_logits,
+@@ -357,6 +359,7 @@
+                 input_batch.expanded_local_pos[lo:hi],
+                 input_batch.seq_lens_cpu_upper_bound.numpy()[start:end],
+                 verify_draft_sampled[lo:hi],
++                chunk_cu_num_logits_np,
+             )
+             chunk_logprobs = self._get_logprobs_tensors(
+                 sampled,

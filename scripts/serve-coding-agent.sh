@@ -2,6 +2,11 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 mode=${1:-dspark}
+export INKLING2_MAX_SEQS=${INKLING2_MAX_SEQS:-4}
+case "$INKLING2_MAX_SEQS" in
+    [1-4]) ;;
+    *) echo "INKLING2_MAX_SEQS must be 1 through 4" >&2; exit 2 ;;
+esac
 case "$mode" in
     dspark)
         export INKLING2_VLLM_DSPARK=1 INKLING2_EXL3_SMALL_DPAS=1 INKLING2_DRAFT_Q8_HEAD=1 INKLING2_DRAFT_REFERENCE_MATH=1
@@ -31,6 +36,9 @@ case ${INKLING2_PREFILL_PROFILE:-reference} in
         export INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-1}
         local_bias=table
         fused_lib=/lab/.work/build/inkling2-vllm-fused-bias.so
+        if (( INKLING2_MAX_SEQS > 1 )) && [[ -s .work/build/inkling2-vllm-batch.so ]]; then
+            fused_lib=/lab/.work/build/inkling2-vllm-batch.so
+        fi
         if [[ ${INKLING2_LIB:-$fused_lib} == "$fused_lib" && -s "${fused_lib#/lab/}" ]]; then
             export INKLING2_LIB=$fused_lib
             local_bias=fused
@@ -77,7 +85,7 @@ export INKLING2_NATIVE_DEPTH_MIX=1 INKLING2_NATIVE_MERGE=1 INKLING2_TUNE_DENSE=1
 export INKLING2_DSPARK_SAMPLING=probabilistic INKLING2_DRAFT_SAMPLE_TOPK=20 INKLING2_DSPARK_VERIFICATION=block
 export INKLING2_KERNEL_CACHE=1 INKLING2_REASONING_BUDGET=1
 export INKLING2_QKV_LIB=/lab/.work/build/inkling2-qkv.so INKLING2_PREP_LIB=/lab/.work/build/inkling2-fused-prep.so
-export INKLING2_AGENT_TOOLS=1 INKLING2_RING_PREFIX=1
+export INKLING2_AGENT_TOOLS=1 INKLING2_RING_PREFIX=${INKLING2_RING_PREFIX:-1}
 for lib in "$INKLING2_CONTROL_LIB" "$INKLING2_EXL3_MOE_LIB" "$INKLING2_QKV_LIB" "$INKLING2_PREP_LIB"; do
     test -s "${lib#/lab/}" || { echo "Missing build artifact: ${lib#/lab/}" >&2; exit 1; }
 done

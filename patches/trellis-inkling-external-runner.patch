@@ -1,5 +1,5 @@
 diff --git a/xpu/exl3xpu/inkling2/sgl_model.py b/xpu/exl3xpu/inkling2/sgl_model.py
-index 9eb7429..8f29ecd 100644
+index 9eb7429..db2cdd2 100644
 --- a/xpu/exl3xpu/inkling2/sgl_model.py
 +++ b/xpu/exl3xpu/inkling2/sgl_model.py
 @@ -38,7 +38,7 @@ _FUSED_CONV = os.environ.get("INKLING2_FUSED_CONV", "1") == "1"
@@ -209,7 +209,7 @@ index 9eb7429..8f29ecd 100644
 +                    self.f32[p + "k_sconv.weight"], self.f32[p + "v_sconv.weight"], self.conv[vi], self.conv_pos,
 +                    self.swa_k[si] if is_local else None, self.swa_v[si] if is_local else None,
 +                    tc["qk_l2_clip_threshold"], tc["rel_l2_clip_threshold"], tc["log_scaling_alpha"],
-+                    float(tc["log_scaling_n_floor"]))
++                    float(tc["log_scaling_n_floor"]), *getattr(self, "_prep_layout", ()))
 +            else:
 +                q, r, gate_s, sink, kb16, vb16 = attn_prep(
 +                    qrgs, k, v, pos, self.f32[p + "q_l2_clip.scale"], self.f32[p + "rel_l2_clip.scale"],

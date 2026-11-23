@@ -106,3 +106,16 @@ def local_xmx(q, k, v, ring_positions, length, pos, rel, proj, sink, *, parts=16
         lse,
     )
     return merge_splits(partial, lse)
+
+
+def batch_xmx(q, k, v, pages, lengths, positions, rel, proj, sink, parts, layout, *, local, packed=False):
+    offsets, slots, max_rows = layout
+    rows, heads, width = q.shape
+    partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
+    lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
+    torch.ops.inkling2_xpu.batch_xmx(
+        q.half().contiguous(), k, v, pages, lengths, positions.int().contiguous(),
+        (rel.float() @ proj.float()).contiguous(), sink.contiguous(), offsets, slots,
+        partial, lse, local, packed, max_rows,
+    )
+    return merge_splits(partial, lse)

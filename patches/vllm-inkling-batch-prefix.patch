@@ -1,0 +1,63 @@
+--- a/v1/core/kv_cache_manager.py
++++ b/v1/core/kv_cache_manager.py
+@@ -148,8 +148,9 @@
+         watermark: float = 0.0,
+         enable_mamba_shared_prefix_checkpoint: bool = False,
+     ) -> None:
+-        from inkling_xpu.ring_prefix import RingPrefix
+-        self.inkling_history = RingPrefix(hash_block_size)
++        import os
++        from inkling_xpu.ring_prefix import RingSlotPool
++        self.inkling_history = RingSlotPool(hash_block_size, int(os.environ["INKLING2_MAX_SEQS"]))
+         self.max_model_len = max_model_len
+         # When unset, fall back to `max_model_len` so the recycling-aware cap
+         # collapses to the prior (uncapped) admission behavior. The scheduler
+@@ -309,7 +310,9 @@
+             )
+         )
+ 
+-        if num_new_computed_tokens and not self.inkling_history.covers(num_new_computed_tokens):
++        if num_new_computed_tokens and self.inkling_history.limit(
++            request.block_hashes, num_new_computed_tokens, request.num_tokens
++        ) != num_new_computed_tokens:
+             computed_blocks = self.empty_kv_cache_blocks.blocks
+             num_new_computed_tokens = num_uncached = 0
+ 
+@@ -615,7 +618,7 @@
+             num_encoder_tokens,
+         )
+ 
+-        self.inkling_history.scheduled(request.request_id, total_computed_tokens + num_new_tokens, num_new_tokens)
++        self.inkling_history.scheduled(request, total_computed_tokens + num_new_tokens, num_new_tokens, num_new_computed_tokens)
+         # P/D: delay caching blocks if we have to recv from
+         # remote. Update state for locally cached blocks.
+         if delay_cache_blocks:
+@@ -701,7 +704,7 @@
+             False otherwise.
+ 
+         """
+-        self.inkling_history.hashes = ()
++        self.inkling_history.reset()
+         if not self.coordinator.reset_prefix_cache():
+             return False
+         if self.log_stats:
+--- a/v1/core/sched/scheduler.py
++++ b/v1/core/sched/scheduler.py
+@@ -1742,6 +1742,7 @@
+             ),
+             new_block_ids_to_zero=self._get_new_block_ids_to_zero(),
+             has_sync_kv_loads=has_sync_kv_loads,
++            inkling_slots={rid: self.kv_cache_manager.inkling_history.active[rid] for rid in num_scheduled_tokens},
+             kv_cache_block_copies=pending_kv_cache_block_copies,
+             kv_connector_block_state=kv_connector_block_state,
+             num_spec_tokens_to_schedule=num_spec_tokens_to_schedule,
+--- a/v1/core/sched/output.py
++++ b/v1/core/sched/output.py
+@@ -323,6 +323,7 @@
+     # (non-final prefill chunks, or requests sure to reach max_tokens), so the
+     # drafter can skip proposing them.
+     skip_drafts: bool = False
++    inkling_slots: dict[str, int] = field(default_factory=dict)
+ 
+     @classmethod
+     def make_empty(cls) -> "SchedulerOutput":

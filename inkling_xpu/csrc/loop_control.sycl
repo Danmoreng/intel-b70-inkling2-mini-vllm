@@ -12,7 +12,7 @@ constexpr int lanes = 128;
 
 void check_rows(const at::Tensor &x) {
     TORCH_CHECK(x.is_xpu() && x.scalar_type() == at::kFloat && x.dim() == 2 && x.is_contiguous() &&
-                x.size(0) >= 1 && x.size(0) <= 8 && x.size(1) == 2304);
+                x.size(0) >= 1 && x.size(0) <= 32 && x.size(1) == 2304);
 }
 
 at::Tensor control_input(const at::Tensor &cur, const at::Tensor &msg) {
@@ -127,7 +127,7 @@ at::Tensor control_many(const at::Tensor &cur, const at::Tensor &msg, const at::
     constexpr int D = 2304, K = 4608, R = 64, WG = 32;
     TORCH_CHECK((count == 3 && first == 0) || (count == 1 && first == 3));
     const int M = cur.size(1), C = count, N = cur.size(0), NW = norm.size(0);
-    TORCH_CHECK(M >= 1 && M <= 8 && (N == 1 || N == C) && (NW == 1 || NW == C));
+    TORCH_CHECK(M >= 1 && M <= 32 && (N == 1 || N == C) && (NW == 1 || NW == C));
     for (const auto &t : {cur, msg, norm, down, ds, up, us})
         TORCH_CHECK(t.is_xpu() && t.device() == cur.device() && t.is_contiguous());
     TORCH_CHECK(cur.scalar_type() == at::kFloat && cur.dim() == 3 && cur.size(2) == D &&
@@ -242,7 +242,7 @@ at::Tensor bank_mix(const at::Tensor &states, const at::Tensor &queries) {
     TORCH_CHECK(states.is_xpu() && states.is_contiguous() && states.scalar_type() == at::kFloat &&
                 states.dim() == 3);
     const int S = states.size(0), M = states.size(1), Q = queries.size(0);
-    TORCH_CHECK(S >= 1 && S <= 16 && M >= 1 && M <= 8 && states.size(2) == D &&
+    TORCH_CHECK(S >= 1 && S <= 16 && M >= 1 && M <= 32 && states.size(2) == D &&
                 queries.device() == states.device() && queries.is_contiguous() &&
                 queries.scalar_type() == at::kFloat && queries.dim() == 2 && queries.size(1) == D);
     auto logits = at::empty({Q, M, S}, states.options()), out = at::empty({Q, M, D}, states.options());
@@ -276,7 +276,7 @@ at::Tensor depth_mix(const at::Tensor &bank, const at::Tensor &indices, const at
                      const at::Tensor &queries, const std::optional<at::Tensor> &norm) {
     constexpr int D = 2304, block = 128, tiles = D / block;
     int M = current.size(0), count = indices.numel() + 1, Q = queries.size(0);
-    TORCH_CHECK(count >= 1 && count <= 16 && M >= 1 && M <= 8 && Q >= 1 && Q <= 4);
+    TORCH_CHECK(count >= 1 && count <= 16 && M >= 1 && M <= 32 && Q >= 1 && Q <= 4);
     for (const auto &t : {bank, indices, current, queries})
         TORCH_CHECK(t.is_xpu() && t.device() == current.device() && t.is_contiguous());
     TORCH_CHECK(indices.scalar_type() == at::kInt && current.scalar_type() == at::kFloat &&

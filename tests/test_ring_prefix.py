@@ -1,8 +1,9 @@
-"""Single-sequence scheduler history boundaries without a GPU or vLLM dependency."""
+"""Scheduler slot ownership and history boundaries without a GPU or vLLM dependency."""
 
+from types import SimpleNamespace
 from unittest import TestCase
 
-from inkling_xpu.ring_prefix import RingPrefix
+from inkling_xpu.ring_prefix import RingPrefix, RingSlotPool
 
 
 class TestRingPrefix(TestCase):
@@ -70,3 +71,28 @@ class TestRingPrefix(TestCase):
                 self.assertEqual(cache.limit(hashes, 73728 + rest - 1, 73728 + rest), 73728)
                 self.assertEqual(cache.limit([-1] * len(hashes), 73735, 73728 + rest), 0)
                 cache.scheduled(f"warm{i + 1}", 73728 + rest, rest)
+
+
+class TestRingSlotPool(TestCase):
+    def test_active_slot_exclusion_and_salted_reuse(self):
+        pool = RingSlotPool(16, 2)
+        a = SimpleNamespace(request_id="a", num_tokens=1033, block_hashes=list(range(65)))
+        b = SimpleNamespace(request_id="b", num_tokens=1033, block_hashes=list(range(65, 130)))
+        for req in (a, b):
+            pool.scheduled(req, 1033, 1033, 0)
+        self.assertNotEqual(pool.active["a"], pool.active["b"])
+        self.assertEqual(pool.limit(a.block_hashes, 1032, 1033), 0)
+        slot = pool.active["a"]
+        pool.finish("a", 1033, a.block_hashes)
+        hit = pool.limit(a.block_hashes, 1032, 1033)
+        self.assertEqual(hit, 1024)
+        self.assertEqual(pool.limit(b.block_hashes, 1032, 1033), 0)
+        a.request_id = "resend"
+        pool.scheduled(a, 1033, 9, hit)
+        self.assertEqual(pool.active["resend"], slot)
+        pool.finish("resend", 0, a.block_hashes)
+        self.assertEqual(pool.limit(a.block_hashes, 1032, 1033), 0)
+        pool.finish("b", 1033, b.block_hashes)
+        self.assertEqual(pool.limit(b.block_hashes, 1032, 1033), 1024)
+        pool.reset()
+        self.assertEqual(pool.limit(b.block_hashes, 1032, 1033), 0)

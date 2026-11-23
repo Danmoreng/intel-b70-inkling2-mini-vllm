@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay the Qwen EXL3 v8 serving matrix on the single-slot Inkling recipe."""
+"""Replay the Qwen EXL3 v8 serving matrix on the Inkling B70 serving recipe."""
 
 import argparse
 import hashlib
@@ -98,12 +98,18 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--base", default="http://127.0.0.1:8081")
     parser.add_argument("--container", default="inkling2-vllm-exl3")
-    parser.add_argument(
+    subset = parser.add_mutually_exclusive_group()
+    subset.add_argument("--batching-4k", action="store_true",
+                        help="Qualify the four-slot recipe at 4K, from one through four simultaneous clients.")
+    subset.add_argument(
         "--isolated-prefix",
         action="store_true",
         help="Only the three 64K cold/warm requests; start a fresh engine first.",
     )
+    parser.add_argument("--ordinary", action="store_true", help="Use ordinary decode for the four-slot 4K sweep.")
     args = parser.parse_args()
+    if args.ordinary and not args.batching_4k:
+        parser.error("--ordinary requires --batching-4k")
     for filename, expected in PINNED.items():
         if hashlib.sha256((args.reference_repo / filename).read_bytes()).hexdigest() != expected:
             raise ValueError(f"Reference harness mismatch: {filename}")
@@ -114,26 +120,38 @@ def main():
     bench = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = bench
     spec.loader.exec_module(bench)
+    if args.ordinary:
+        # The pinned speculative-round estimator divides by the proposal width.
+        # Ordinary decode has no such estimator. run_once still computes all
+        # timing metrics and aggregate decode from the same counter samples.
+        bench.summarize_overlap = lambda *args: {}
     bench.MODEL = MODEL
     bench.CHAT_TEMPLATE_KWARGS = {"reasoning_effort": "none"}
     cases = bench.load_scenarios(args.reference_repo / "benchmarks/current-profile-scenarios.json")
     if args.isolated_prefix:
         cases = [s for s in cases if s.name == "prefix-64k-cold-warm"]
+    if args.batching_4k:
+        cases = [s for s in cases if s.name == "phase-4k-c1" or s.name.startswith("concurrency-4k-")]
+        if sorted(s.concurrency for s in cases) != [1, 2, 3, 4]:
+            raise ValueError("Incomplete 4K reference sweep")
     out = args.output
     out.mkdir(parents=True, exist_ok=False)
     fixtures = out / "adapted-inputs"
     for group in INVENTORIES:
         prepare_fixtures(args.reference_run, fixtures, group)
     runtime = runtime_receipt(args.container)
-    if any(runtime["environment"].get(key) != "1" for key in ("INKLING2_DSPARK_ADAPTIVE", "INKLING2_VISION")):
-        raise ValueError("Expected the adaptive DSpark profile with vision enabled")
+    env = runtime["environment"]
+    if env.get("INKLING2_VISION") != "1" or (not args.ordinary and env.get("INKLING2_DSPARK_ADAPTIVE") != "1"):
+        raise ValueError("Expected vision and the requested decode profile")
     (out / "runtime.json").write_text(json.dumps(runtime, indent=2))
     config = bench.inspect_container(args.container)
     models = bench.http_json(args.base, "/v1/models")
     if not any(m["id"] == MODEL for m in models["data"]):
         raise ValueError("Selected endpoint does not serve Inkling")
-    if (config["max_num_seqs"], config["num_speculative_tokens"], config["max_model_len"]) != (1, 7, 262144):
-        raise ValueError("Expected the qualified single-sequence DSpark-7 recipe")
+    slots = 4 if args.batching_4k else 1
+    width = None if args.ordinary else 7
+    if (config["max_num_seqs"], config["num_speculative_tokens"], config["max_model_len"]) != (slots, width, 262144):
+        raise ValueError(f"Expected {slots} slots, draft width {width}, and 262144 context")
     power = [
         p
         for p in Path("/sys/class/hwmon").glob("hwmon*/power1_cap")
@@ -175,6 +193,15 @@ def main():
                 )
                 if row["preemptions"] or any(r["reasoning_chars"] for r in row["requests"]):
                     raise RuntimeError("Unexpected preemption or reasoning text")
+                if args.batching_4k and not all(row[key] for key in (
+                    "all_outputs_nonempty", "all_prompt_counts_match", "all_completion_counts_exact",
+                    "all_finish_reasons_length", "admission_expectation_met"
+                )):
+                    raise RuntimeError("Incomplete or incorrectly accounted serving wave")
+                if args.batching_4k and case.concurrency > 1 and (
+                    row["peak_running"] != case.concurrency or not row["fully_overlapped_aggregate_decode_tokens_per_s"]
+                ):
+                    raise RuntimeError(f"Missing simultaneous decode at C{case.concurrency}")
                 with (out / (group + ".jsonl")).open("a") as f:
                     print(json.dumps(row), file=f)
     if bench.inspect_container(args.container)["id"] != config["id"]:

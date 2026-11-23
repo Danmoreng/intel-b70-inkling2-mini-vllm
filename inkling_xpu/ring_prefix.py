@@ -1,4 +1,4 @@
-"""Guard vLLM prefix hits with the single slot's resident or saved ring history."""
+"""Guard vLLM prefix hits with the owning slot's resident or saved ring history."""
 
 
 class RingPrefix:
@@ -59,3 +59,40 @@ class RingPrefix:
                 if self.hashes[index - 1] == hashes[index - 1]:
                     return index * self.hash_tokens
         return 0
+
+
+class RingSlotPool:
+    """The scheduler owns slot allocation. Only idle slots can lend their saved history."""
+
+    def __init__(self, hash_tokens, slots):
+        self.histories = [RingPrefix(hash_tokens) for _ in range(slots)]
+        self.idle = list(range(slots))
+        self.active = {}
+
+    def limit(self, hashes, allowed, tokens):
+        return max((self.histories[s].limit(hashes, allowed, tokens) for s in self.idle), default=0)
+
+    def scheduled(self, request, end, rows, hit):
+        owner = request.request_id
+        if owner not in self.active:
+            if hit:
+                slot = next((s for s in self.idle if self.histories[s].limit(
+                    request.block_hashes, hit, request.num_tokens) == hit), None)
+                if slot is None:
+                    raise RuntimeError("KV prefix hit has no available matching ring history")
+            else:
+                slot = self.idle[0]
+                self.histories[slot] = RingPrefix(self.histories[slot].hash_tokens)
+            self.idle.remove(slot)
+            self.active[owner] = slot
+        self.histories[self.active[owner]].scheduled(owner, end, rows)
+
+    def finish(self, owner, committed, hashes):
+        slot = self.active.pop(owner, None)
+        if slot is not None:
+            self.histories[slot].finish(owner, committed, hashes)
+            self.idle.append(slot)
+
+    def reset(self):
+        for history in self.histories:
+            history.hashes = ()
