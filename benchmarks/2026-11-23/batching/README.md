@@ -8,16 +8,20 @@ During decode the native XMX attention kernel uses per-request query boundaries 
 
 ![Pure decode throughput for all active clients and per active client](serving-4k.png)
 
-| Active clients | Ordinary total tok/s | Ordinary per client | DSpark B7 total tok/s | DSpark B7 per client | Qwen R12 total tok/s | Qwen per client |
+Both modes below ran with four available slots. Rates are output tokens per second. Each speedup uses the single-request median for the same mode.
+
+| Active requests | DSpark B7 total | Per request | Total vs. 1 | Ordinary total | Per request | Total vs. 1 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 58.5 | 58.5 | 82.8 | 82.8 | 60.0 | 60.0 |
-| 2 | 93.9 | 46.9 | 94.6 | 47.3 | 117.5 | 58.8 |
-| 3 | 112.6 | 37.5 | 101.8 | 33.9 | 155.5 | 51.8 |
-| 4 | 122.3 | 30.6 | 106.3 | 26.6 | 188.9 | 47.2 |
+| 1 | 82.8 | 82.8 | 1.00× | 58.5 | 58.5 | 1.00× |
+| 2 | 94.6 | 47.3 | 1.14× | 93.9 | 46.9 | 1.61× |
+| 3 | 101.8 | 33.9 | 1.23× | 112.6 | 37.5 | 1.93× |
+| 4 | 106.3 | 26.6 | 1.28× | 122.3 | 30.6 | 2.09× |
+
+On the deployed two-slot worker, the same DSpark replay reached **80.7 tok/s** for one request and **93.6 tok/s combined** for two (**46.8 tok/s per request**, 1.16× the single-request throughput). Open circles mark this retest.
 
 For each wave, the common decode window begins after every stream has emitted text and ends by the earliest final text event. The report trims a monitor sample from each edge. It sums engine generation-token deltas and elapsed time across adjacent samples with all clients running, zero waiting requests, and no intervening prefill, completion or preemption. Dividing those tokens by those seconds gives aggregate pure decode. The per-client column is that rate divided by the number of active clients.
 
-All three runs used identical R12 code-review prompts and sampling settings. The nominal 4K input contained 3,864–5,514 Inkling tokens. Each client generated 1,024 tokens. Thinking was disabled in this synthetic comparison. Medium thinking with a cumulative per-request budget is available in the coding profile. Each Inkling mode completed 42 requests across 18 waves. The table reports medians of five measured C1 waves and three waves each at C2, C3 and C4. The four warm-up waves are excluded. The ordinary 4K run preceded the long-context draft-memory fix. The DSpark figures include it. The receipts record the loaded file hashes for both workers. [Token counts and sampled decode seconds for each wave](waves.json)
+Both decode modes used identical R12 code-review prompts and sampling settings. The nominal 4K input contained 3,864–5,514 Inkling tokens. Each client generated 1,024 tokens. Thinking was disabled in this synthetic comparison. Medium thinking with a cumulative per-request budget is available in the coding profile. Each Inkling mode completed 42 requests across 18 waves. The table reports medians of five measured C1 waves and three waves each at C2, C3 and C4. The four warm-up waves are excluded. The ordinary 4K run preceded the long-context draft-memory fix. The DSpark figures include it. The receipts record the loaded file hashes for both workers. [Token counts and sampled decode seconds for each wave](waves.json)
 
 ## Single-client check against the long-context sweep
 
@@ -33,6 +37,7 @@ The original long-context plot uses the engine's native decode duration for the 
 
 ## Correctness and capacity
 
+- On the two-slot Observatory worker, four simultaneous arrivals reached a peak of two running and two waiting. All four returned the expected output. The cold/warm control also verified prefix reuse, overlapping decode and recovery after a client disconnect.
 - Ordinary and adaptive B7 each reproduced four independent 128-token greedy control streams. The four cache hits contained 256, 448, 320 and 560 tokens. A client disconnect preserved the other response and the replacement request. Six simultaneous arrivals exercised slot turnover. The deployed four-slot service repeated these checks.
 - With four 61,440-token prompts, every request retrieved its own key and generated 384 tokens. All four streams generated simultaneously for 5.24 s. Two 139,264-token prompts exceeded the shared target pool. One waited while the other ran, both retrieved the right key, and the preemption count stayed at zero. This last case had exhausted GPU resources before the draft-storage and graph changes.
 - The 74,690-token prefix regression produced identical 1,024-token output and visible-text hashes on the cold request, two resends and a new cache salt. Both resends reused 74,672 tokens. Changing the salt gave a clean miss.
@@ -60,12 +65,14 @@ python3 scripts/bench-serving-matrix.py --batching-4k --reference-repo "$QWEN" \
   --reference-run "$R12" --base http://127.0.0.1:8093 --output results/batch-dspark
 ```
 
-Restart with `bash scripts/serve-coding-agent.sh ordinary` and run the same replay with `--ordinary` and `--output results/batch-ordinary`. Then generate the comparison and run the streaming lifecycle check.
+Restart with `bash scripts/serve-coding-agent.sh ordinary` and run the same replay with `--ordinary` and `--output results/batch-ordinary`. Then generate the chart and run the streaming lifecycle check.
 
 ```bash
 uv run --with matplotlib==3.11.2 python scripts/report-serving-batch.py \
   --ordinary results/batch-ordinary --dspark results/batch-dspark --reference-run "$R12"
 python3 scripts/check-serving-batch.py --clients 4
 ```
+
+To reproduce the Observatory points, start a fresh DSpark worker with the same environment and `INKLING2_MAX_SEQS=2`. Against that worker, use the same replay command with `--batching-slots 2` and a fresh output directory. Pass that directory to the chart generator with `--two-slot`. To redraw the published figure directly from the archived waves, run `uv run --with matplotlib==3.11.2 python scripts/report-serving-batch.py`.
 
 The coding launcher accepts `INKLING2_MAX_SEQS=1` through `4`. With one slot it selects the single-request cache and kernel path. The configured maximum per request is 262,144 tokens including output. All clients share a physical pool of 263,168 target KV positions on the reference host.

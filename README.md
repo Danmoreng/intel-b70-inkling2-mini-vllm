@@ -10,12 +10,25 @@ Run **Inkling 2 Mini on one 32 GB Intel Arc Pro B70** with a **262,144-token con
 | Model | 4-bit EXL3 experts, BF16 dense weights. [Pinned checkpoint](https://huggingface.co/grant-ai/Inkling-2-Mini-EXL3-4bpw/tree/c266f76b68429255e1d6ec151d0aa15f48f6abcc) |
 | Runtime | vLLM 0.33.0 and PyTorch 2.15.0+xpu |
 | Context and cache | 262,144 input and output tokens per request, shared FP8 KV pool, automatic prefix reuse |
-| Serving | Up to four active sequences, 6,144-token prefill chunks, up to seven DSpark proposals per request and round |
+| Serving | Two active requests in the Observatory, up to four in the standalone worker. Prefill chunks of 6,144 tokens and up to seven DSpark proposals per request per round. |
 | API | Chat, images, streamed tool calls and completions at `http://127.0.0.1:8093/v1`. Model ID `inkling2-mini-exl3-b70`. |
 
 ## Concurrent serving at 180 W
 
-With all four clients decoding 4K code-review prompts, the B70 generated **122.3 tok/s with ordinary decode** and **106.3 tok/s with adaptive DSpark B7** in aggregate. With one active client, DSpark achieved **82.8 decode tok/s**. [Pure decode by concurrency, Qwen comparison and validation](benchmarks/2026-11-23/batching/README.md)
+The Observatory serves **two requests at once** with adaptive DSpark B7. Additional arrivals queue until a slot and sufficient KV cache are available. The table shows how decode scales on a worker configured with four slots. Rates are output tokens per second, measured only while every request is decoding.
+
+| Active requests | DSpark B7 total | Per request | Total vs. 1 | Ordinary total | Per request | Total vs. 1 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 82.8 | 82.8 | 1.00× | 58.5 | 58.5 | 1.00× |
+| 2 | 94.6 | 47.3 | 1.14× | 93.9 | 46.9 | 1.61× |
+| 3 | 101.8 | 33.9 | 1.23× | 112.6 | 37.5 | 1.93× |
+| 4 | 106.3 | 26.6 | 1.28× | 122.3 | 30.6 | 2.09× |
+
+![Inkling 2 Mini pure decode at 180 W. Combined and mean per-request output throughput for one to four simultaneous requests.](benchmarks/2026-11-23/batching/serving-4k.png)
+
+On the deployed two-slot worker, the same DSpark replay reached **80.7 tok/s** for one request and **93.6 tok/s combined** for two (**46.8 tok/s per request**, 1.16× the single-request throughput). Open circles mark this retest.
+
+Each request used a nominal 4K code-review prompt and generated 1,024 sampled tokens. Values are medians of five measured waves at one request and three at each higher concurrency. [Measurement method, per-wave data and reproduction commands](benchmarks/2026-11-23/batching/README.md)
 
 ## Long-context performance at 180 W
 
@@ -44,7 +57,7 @@ bash scripts/check-sycl.sh paged-fused
 bash scripts/check-sycl.sh paged-batch
 bash scripts/build-loop-control.sh
 
-INKLING2_PREFILL_PROFILE=optimized INKLING2_VISION=1 INKLING2_VISION_FUSED_QKV=1 \
+INKLING2_MAX_SEQS=2 INKLING2_PREFILL_PROFILE=optimized INKLING2_VISION=1 INKLING2_VISION_FUSED_QKV=1 \
   bash scripts/serve-coding-agent.sh dspark
 ```
 

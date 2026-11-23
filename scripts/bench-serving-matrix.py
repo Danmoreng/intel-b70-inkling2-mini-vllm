@@ -102,16 +102,21 @@ def main():
     parser.add_argument("--container", default="inkling2-vllm-exl3")
     subset = parser.add_mutually_exclusive_group()
     subset.add_argument("--batching-4k", action="store_true",
-                        help="Report pure decode at 4K with one through four simultaneously generating clients.")
+                        help="Report pure decode at 4K from one client up to the configured slot count.")
+    parser.add_argument("--batching-slots", choices=(2, 4), type=int,
+                        help="Worker slots for the 4K sweep (default: 4).")
     subset.add_argument(
         "--isolated-prefix",
         action="store_true",
         help="Only the three 64K cold/warm requests; start a fresh engine first.",
     )
-    parser.add_argument("--ordinary", action="store_true", help="Use ordinary decode for the four-slot 4K sweep.")
+    parser.add_argument("--ordinary", action="store_true", help="Use ordinary decode for the 4K batching sweep.")
     args = parser.parse_args()
     if args.ordinary and not args.batching_4k:
         parser.error("--ordinary requires --batching-4k")
+    if args.batching_slots is not None and not args.batching_4k:
+        parser.error("--batching-slots requires --batching-4k")
+    slots = (args.batching_slots or 4) if args.batching_4k else 1
     for filename, expected in PINNED.items():
         if hashlib.sha256((args.reference_repo / filename).read_bytes()).hexdigest() != expected:
             raise ValueError(f"Reference harness mismatch: {filename}")
@@ -136,6 +141,7 @@ def main():
         cases = [s for s in cases if s.name == "phase-4k-c1" or s.name.startswith("concurrency-4k-")]
         if sorted(s.concurrency for s in cases) != [1, 2, 3, 4]:
             raise ValueError("Incomplete 4K reference sweep")
+        cases = [s for s in cases if s.concurrency <= slots]
     out = args.output
     out.mkdir(parents=True, exist_ok=False)
     fixtures = out / "adapted-inputs"
@@ -150,7 +156,6 @@ def main():
     models = bench.http_json(args.base, "/v1/models")
     if not any(m["id"] == MODEL for m in models["data"]):
         raise ValueError("Selected endpoint does not serve Inkling")
-    slots = 4 if args.batching_4k else 1
     width = None if args.ordinary else 7
     if (config["max_num_seqs"], config["num_speculative_tokens"], config["max_model_len"]) != (slots, width, 262144):
         raise ValueError(f"Expected {slots} slots, draft width {width}, and 262144 context")

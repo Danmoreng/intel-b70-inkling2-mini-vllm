@@ -344,5 +344,21 @@
         ]
       ]
     }
+  },
+  "observatory_two_slot": {
+    "clients": 2,
+    "tokens_per_client": 128,
+    "overlap_s": 1.295551554998383,
+    "turnover_wave": 4,
+    "cached_tokens": [
+      256,
+      448
+    ],
+    "aborted_after": 9,
+    "greedy_parity": true,
+    "survivor_and_replacement": true,
+    "peak_running": 2,
+    "peak_waiting": 2,
+    "metric_samples": 91
   }
 }

@@ -467,6 +467,96 @@
         "aggregate_decode_tps": 59.064178076688556,
         "mean_decode_tps_per_client": 59.064178076688556
       }
+    ],
+    "Observatory DSpark B7": [
+      {
+        "scenario": "concurrency-4k-c2",
+        "repeat": 1,
+        "workload_sha256": "db5a631033d160b015b80d4b76257c52f462afcce027039bbed3cef3f34dde51",
+        "clients": 2,
+        "generated_tokens": 1930,
+        "sampled_seconds": 18.902913013997022,
+        "intervals": 74,
+        "aggregate_decode_tps": 102.10066557312594,
+        "mean_decode_tps_per_client": 51.05033278656297
+      },
+      {
+        "scenario": "concurrency-4k-c2",
+        "repeat": 2,
+        "workload_sha256": "fecabdbbb74f7e0ecf97cac9bb3cc4701a4ab986eb100b0d6f5bcb57afaad6ce",
+        "clients": 2,
+        "generated_tokens": 1842,
+        "sampled_seconds": 19.675487819004047,
+        "intervals": 77,
+        "aggregate_decode_tps": 93.6190257108065,
+        "mean_decode_tps_per_client": 46.80951285540325
+      },
+      {
+        "scenario": "concurrency-4k-c2",
+        "repeat": 3,
+        "workload_sha256": "148e28ebd7338ed1654d5968db4a37b3098e8eaad537a0d63031f36c669321e8",
+        "clients": 2,
+        "generated_tokens": 1835,
+        "sampled_seconds": 20.208590996000567,
+        "intervals": 79,
+        "aggregate_decode_tps": 90.80296594468959,
+        "mean_decode_tps_per_client": 45.401482972344795
+      },
+      {
+        "scenario": "phase-4k-c1",
+        "repeat": 1,
+        "workload_sha256": "58b982c1a015488f68babdb3e94c4dfd20768411dcf518808c7e4965a66483b4",
+        "clients": 1,
+        "generated_tokens": 976,
+        "sampled_seconds": 11.496498450003855,
+        "intervals": 45,
+        "aggregate_decode_tps": 84.895414394604,
+        "mean_decode_tps_per_client": 84.895414394604
+      },
+      {
+        "scenario": "phase-4k-c1",
+        "repeat": 2,
+        "workload_sha256": "b055f1a3306aaaa725e98dd71377e6791e19b737f0a44add35abf24c6902bd05",
+        "clients": 1,
+        "generated_tokens": 969,
+        "sampled_seconds": 12.00661957400007,
+        "intervals": 47,
+        "aggregate_decode_tps": 80.70548034172224,
+        "mean_decode_tps_per_client": 80.70548034172224
+      },
+      {
+        "scenario": "phase-4k-c1",
+        "repeat": 3,
+        "workload_sha256": "f1531fb4fb84737b6662f901713b3954d6a1ffa5a9313e9568082f3b1cd1b6a9",
+        "clients": 1,
+        "generated_tokens": 984,
+        "sampled_seconds": 12.276400711998576,
+        "intervals": 48,
+        "aggregate_decode_tps": 80.1537863649456,
+        "mean_decode_tps_per_client": 80.1537863649456
+      },
+      {
+        "scenario": "phase-4k-c1",
+        "repeat": 4,
+        "workload_sha256": "222a0a6c787ebf5e166d342c4b74bb12c6daf5660e40bd9de1b0da073bbf7519",
+        "clients": 1,
+        "generated_tokens": 957,
+        "sampled_seconds": 12.529443958999764,
+        "intervals": 49,
+        "aggregate_decode_tps": 76.38008543169207,
+        "mean_decode_tps_per_client": 76.38008543169207
+      },
+      {
+        "scenario": "phase-4k-c1",
+        "repeat": 5,
+        "workload_sha256": "1138701f746a1574bd6ee4a5df204c3a6b183c7bc5ba03abb56384d387cb45ce",
+        "clients": 1,
+        "generated_tokens": 938,
+        "sampled_seconds": 9.960243010995327,
+        "intervals": 39,
+        "aggregate_decode_tps": 94.1744090946899,
+        "mean_decode_tps_per_client": 94.1744090946899
+      }
     ]
   },
   "runs": {
@@ -559,6 +649,53 @@
       },
       "checkout_head_at_start": "ee5804c11f7ccc7b154f01a47bcf90f73b940830",
       "max_num_seqs": 4,
+      "num_speculative_tokens": 7
+    },
+    "Observatory DSpark B7": {
+      "start": "2026-11-23T22:28:04.937371+01:00",
+      "end": "2026-11-23T22:31:30.893912+01:00",
+      "power_w": 180,
+      "image": "sha256:131dd9e11809de2f3136547618f130ee238f0b90cd5718567bcdd0dad5360e19",
+      "files": {
+        "/lab/.work/build/inkling2-fused-prep.so": "b3f8352720510e2f1715aa6f242fe21d9a8c68dc28786d590843c8f2ad5f7419",
+        "/lab/.work/build/inkling2-loop-control.so": "cab100a08fbdb4fff5f87bc831607091d8e06765bf9f00eb16f89375d6903a36",
+        "/lab/.work/build/inkling2-qkv.so": "1cf9e9536b2341dfc6bdab980826c28fe95230199adb112bb7ff8d806e6a6fe8",
+        "/lab/.work/build/inkling2-reasoning-budget.so": "fa2dcfc85a2fe74d919c2f8e17a7211cceff135dbbb2e83002e17546e2b30b14",
+        "/lab/.work/build/inkling2-vllm-batch.so": "a09a4f0f3d3fee9903db350438b7c729c85de30b541b8b4637af88d254d31353",
+        "/lab/.work/vllm-inkling/config/config.json": "1ed4c05d8efb4e6d15459cf15fc895a2454d46e2a15f353c50a970ae73ce49d9",
+        "/lab/inkling_xpu/batch_graph.py": "9c5ebf3db0810eeb7225d9ff767b652def7df5996c4e5ae7497062896b80e15c",
+        "/lab/inkling_xpu/controller.py": "5e6b6a0216f4b0f5c2aba8d47da8f430fc06ddc4fe7f3351570464329884fb97",
+        "/lab/inkling_xpu/dspark.py": "cfce9a6de9e24f70a6e2f7707d5ae6d84e3b99c5f4927497097cfae226b5b5a3",
+        "/lab/inkling_xpu/exl3_experts.py": "f1a8f29b5acc08bf5371ed55ffd831008321afeb7b8a757ef1cc6bf1fdcde6a9",
+        "/lab/inkling_xpu/grouped_dense.py": "a63e8a0a1c45bcf3e74709eb2fb3db7597e1d2ea1bb79ba91471b5529b188512",
+        "/lab/inkling_xpu/packed_kv.py": "a995872a2f9f6c27d217027e00fb58eaa8972f8fc970b5ce06da665813e99fd1",
+        "/lab/inkling_xpu/paged_attention.py": "20eabc4bbd8db8883ed8a17d342a71b0d1a9a487cd94b0b1a0f4d390c11efafb",
+        "/lab/inkling_xpu/prefill_controller.py": "176234b53652363c1aa6537ba1ca5c7c9e5f48b705c60ebd771e4c4dd69a83e2",
+        "/lab/inkling_xpu/prefill_depth.py": "77e1821b85fe2ab2eecbba0a8ab63641a11b7b20b966de5584c6db99cb2d47d6",
+        "/lab/inkling_xpu/prefill_kernels.py": "485ba83137b45423b14e1885faaba542b762cecb43d49e03655080ff775c04e1",
+        "/lab/inkling_xpu/prefix_attention.py": "eb475ef142c8c6c3d1ff21abd1842a3292bdb67930c10b7fea434104a82a4560",
+        "/lab/inkling_xpu/prefix_io.py": "f99a356583b997724c5da3670ff153d4d8ba950afd3ffdf742a510c0a7bf74a8",
+        "/lab/inkling_xpu/prefix_tail.py": "824f4f1f51bd7ec1fbf86a62b8c55c01c4f1624cb9b9bda5e0b0d35bc0c04ad2",
+        "/lab/inkling_xpu/ring_prefix.py": "0bb8951c1c5172639662584b809739d1f930f879602d9a210bd7d2103eebc3d4",
+        "/lab/inkling_xpu/split_attention.py": "35a91e28a1cd05eb017e4a9a20ad1aa31f4cbc7132de9c312fec5ac6755ce6be",
+        "/lab/inkling_xpu/vision.py": "0afd3c695cd1c2d91a11cffa26f882f48ca78b5706c4a2e9cfa03b0d60639447",
+        "/lab/inkling_xpu/vllm_model.py": "80c1406deb34cff863c3620c9c2863fbb5d25970b6ec8b1db4385f01ac44b287",
+        "/lab/inkling_xpu/vllm_plugin.py": "80c81c3118c1e1930c060fadfc974f31338d0ae6e0b965c3f023a05d273b58d0",
+        "/lab/models/exl3/checkpoint.json": "c93eb392101b42ddbecf1034c91f0c8084574370a04e0707df72d88d9985c87f",
+        "/opt/venv/lib/python3.12/site-packages/vllm/config/vllm.py": "dc816ddad6d62ad1e3c4bcb81db7a94bc9952f38a1718810adcd5c7fdfd807cf",
+        "/opt/venv/lib/python3.12/site-packages/vllm/renderers/inkling.py": "215afc69002860b59d8706ba9a58e717c957fff8f4a5b20cdcefaf34294f8409",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/core/kv_cache_manager.py": "b64f838d424b6af0d956deb82eff5fe2f448cca90c32d227d637812858dc319b",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/core/sched/output.py": "acfb9664de8c33a63abc3d67a2a10b375d5cd14bc9202ff15e089c91746e8ecc",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/core/sched/scheduler.py": "c5e4984585428af91e2582632bd3158fa64c35e4ef7498680c9363508343760a",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/model_runner.py": "302e7c7e32dc142ff44af3db237c8e6193976e430f2439cb1b46862494eb0db1",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/sample/sampler.py": "69623fdefb7a49dce9ed38a96dd8a6b35a38ee7806abd1d6541b8f058601dc7f",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/sample/thinking_budget.py": "2aa51fd2ef955f023d7e2048daa684e540e6a678f363ef6dab5d0b56559d8f6d",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/spec_decode/__init__.py": "40a68c70830198999934f8133100377f88fafafd685438ced9471bb72723aa68",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/spec_decode/rejection_sampler.py": "38e5925711ac88f0dce6e1d00bfbc34ae0c2c82721c2177bfbd44493eda50def",
+        "/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/spec_decode/utils.py": "a5ed0a9d12a58e7ab3ca4cf1621c86c3d08b96e3bc729ee06fa19453927c10df"
+      },
+      "checkout_head_at_start": "5babc11db669d9528804f9a160dc2e7e3f05d5e2",
+      "max_num_seqs": 2,
       "num_speculative_tokens": 7
     }
   }
