@@ -1,144 +1,35 @@
 # Inkling 2 Mini on Intel Arc Pro B70
 
-Serve [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini)
-on a single **32 GB Intel Arc Pro B70** using vLLM 0.33, 4-bit EXL3
-experts and native SYCL kernels. The vLLM endpoint supports ordinary decoding,
-the checkpoint's DSpark drafter, streamed tool calls and single-sequence
-prefix reuse. A second recipe runs the Unsloth 4-bit GGUF in llama.cpp.
+Run **Inkling 2 Mini on one 32 GB Intel Arc Pro B70** with a **262,144-token context window**, vision and tool calling. The repository provides the vLLM adapter, native Intel XPU kernels and launch scripts for an OpenAI-compatible server. The measured 180 W profile uses 4-bit EXL3 weights and adaptive DSpark speculative decoding.
 
-On ten blind Pi repairs (six Python and four frontend TypeScript issues), adaptive Inkling passed 7/10 and returned all seven before the deadline. A focused instruction gave 8/10 passing patches, six returned in time. Qwen 27B passed and returned 3/10. On the four TypeScript issues, the two Inkling profiles each passed three and Qwen passed one. On the separate streaming-codec task Qwen passed one of two seeds and Inkling passed neither. [Paired results, deadlines, decode measurements and long-context repairs](benchmarks/2026-11-22/quality/README.md)
+## Current profile
 
-The coding launcher defaults to adaptive DSpark with up to seven proposals per round. Set `INKLING2_DRAFT_MAX=3` to use the previous adaptive three-proposal profile. [Paired Pi repair speeds, K/V workspace trials and screenshot encoder timings](benchmarks/2026-11-22/recipe-comparison.md) · [Cold synthetic prefill and decode from 2K to 128K](benchmarks/2026-11-22/adaptive-seven-context.md)
-
-With `INKLING2_PREFILL_PROFILE=optimized`, the DSpark launcher also tunes attention splits by context and verification width. At starting contexts of 64K and 128K this reduced the target replay time by **4.1% and 3.3%** on a Pi repair, weighting both profiles by the same observed widths. Set `INKLING2_DSPARK_VERIFY_TUNING=0` to select the previous split counts. [Agent throughput, quality checks, maximum context and ordinary-decode comparison](benchmarks/2026-11-23/attention/README.md)
-
-At **180 W**, the optimized profile now reaches **3,083 tok/s at 32K** and **2,894 tok/s at 64K** on cold Pi prompts. At 32K, median time to first output is **10.75 s**, down from 12.30 s. The full 262,144-token window and a 64K Pi repair were verified with vision, FP8 KV and adaptive DSpark enabled. [Expert kernels, fused local bias, per-run measurements and reproduction](benchmarks/2026-11-23/prefill-180w/README.md)
-
-The previous adaptive EXL3 expert tile processed 32K / 64K / 128K cold Pi inputs at **2,663 / 2,513 / 2,257 tok/s at 180 W** and **3,015 / 2,852 / 2,560 tok/s at 230 W**. Vision, FP8 KV and adaptive DSpark were enabled at both limits. [Matched power and kernel measurements](benchmarks/2026-11-23/prefill-power/README.md)
-
-For a Pi Coding Agent session that starts close to the 262,144-token limit, set `compaction.keepRecentTokens` to `4096` in the session profile and leave `reserveTokens` at `16384`. On one blind Django repair with 240,518 initial Inkling tokens, both seeds compacted and passed the official tests. With the default 20,000-token retention, both seeds exhausted the window. Medium reasoning and the 8,192-token thinking budget were active in all four runs. [Measured Pi settings and outcomes](benchmarks/2026-11-22/quality/long-pi.md)
-
-The opt-in `INKLING2_PREFILL_PROFILE=optimized` profile reached **2,700 / 2,582 / 2,487 tok/s** on 4,844 / 16,635 / 31,376 cold Pi input tokens with vision enabled and a 180 W power cap. A 240,006-token image-and-text retrieval passed. The full 96K Pi repair passed both issue regression tests and 115 of 117 preservation tests. The previous `reference` profile is the default. [Kernel changes, quality results, interrupted 240K repair and launch command](benchmarks/2026-11-22/prefill/prefill-kernel-sweep.md)
-
-For faster prompt processing with adaptive DSpark, append `--max-num-batched-tokens 4096` to the coding launcher. On the B70 this improved cold prefill by 3.5–3.8% across 4.8K, 16.6K and 31.4K input tokens through Pi. At 31.4K, median time to first output fell from 18.44 to 17.77 seconds. At 240,518 tokens it saved 8.94 seconds of prefill. The long coding repair passed with both settings and took longer overall with the larger chunk. [Qwen comparison, Strata Intel kernels and replay](benchmarks/2026-11-22/prefill/README.md)
-
-For text sessions with frequent medium-length cold prompts, set `INKLING2_VLLM_BATCH=6144` when starting the coding launcher. At 16,635 input tokens this reduced median first-output latency from 10.30 to 9.23 seconds compared with 4,096. At 31,376 tokens the difference was 0.15 seconds, with 1.31 GiB less free VRAM. The 4,096 setting has the 240K repair qualification. [Scheduler measurements and Pi results](benchmarks/2026-11-22/prefill/chunk-sweep.md)
-
-For browser screenshots, use the optional image-enabled coding profile below. A real Pi browser session on the B70 correctly read a randomized image and used DSpark to verify the response. [Image handling, screenshot and draft counters](benchmarks/2026-11-22/vision/README.md)
-
-```bash
-INKLING2_VISION=1 INKLING2_DSPARK_ADAPTIVE=1 bash scripts/serve-coding-agent.sh dspark --max-num-batched-tokens 4096
-```
-
-## Serving performance at 180 W
-
-Across **20 scenarios, 70 measured waves and 124 requests**, Inkling delivered **52.37 output tok/s** over summed wave time. Qwen3.8-27B EXL3 delivered **51.68 tok/s** on the same source text. Each request produced exactly 1,024 sampled tokens with thinking off. Both runs completed with zero preemptions. The 17 warmup waves and the separate 64K prefix check are excluded.
-
-| Inkling workload | Actual input tokens per client | First token | Active decode | Whole-wave output |
-| --- | ---: | ---: | ---: | ---: |
-| 4K cold, one client | 5,292 | 1.59 s | 81.16 tok/s | 71.93 tok/s |
-| 64K cold, one client | 77,274 | 27.47 s | 74.46 tok/s | 24.86 tok/s |
-| 128K cold, one client | 154,584 | 63.12 s | 61.82 tok/s | 12.75 tok/s |
-| 195K cold, one client | 230,861 | 105.82 s | 51.13 tok/s | 8.14 tok/s |
-| 16K prefix resend, one client | 18,187 | 0.13 s | 80.47 tok/s | 79.88 tok/s |
-| 64K prefix resend, one client | 74,690 | 24.34 s | 58.85 tok/s | 36.17 tok/s |
-| 4K each, four clients | 4,945 | 22.43 s | 83.88 tok/s | 74.98 tok/s |
-
-The workload labels use Qwen's input budgets. Actual inputs use the Inkling tokenizer and show the per-wave mean client length at C4. Table entries are wave medians, with two resends for each prefix. With four simultaneous clients, the scheduler admitted one sequence and queued up to 3. Whole-wave output includes that wait and prefill. Both 16K resends hit the cache. Only the first 64K resend hit in this historical matrix. The current recipe reuses **74,672 of 74,690 tokens on both resends**. On the original 64K follow-up requests, time to first visible text fell from **18.31 / 27.16 s** on a fresh worker to **2.55 / 0.70 s**. [Prefix-cache repair and cold/cached token checks](benchmarks/2026-11-23/prefix-cache/README.md)
-
-![Single-client prefill, decode and first-token latency on Inkling and Qwen](benchmarks/2026-11-23/serving/serving-context.png)
-
-![Serving throughput and latency for one to four simultaneous clients](benchmarks/2026-11-23/serving/serving-concurrency.png)
-
-[Full results, prefix controls, per-wave evidence and reproduction](benchmarks/2026-11-23/serving/README.md)
-
-## Validated profile
-
-| Setting | Reference configuration |
+| | Optimized configuration |
 | --- | --- |
-| GPU | 1 × Intel Arc Pro B70, 32 GB, 180 W |
-| Checkpoint | [Inkling 2 Mini EXL3 4bpw](https://huggingface.co/grant-ai/Inkling-2-Mini-EXL3-4bpw/tree/c266f76b68429255e1d6ec151d0aa15f48f6abcc), MCG expert weights, BF16 dense weights |
-| Runtime | vLLM 0.33.0, PyTorch 2.15.0+xpu, Level Zero |
-| Context | 262,144 input and output tokens combined |
-| Prefill | Grouped XMX expert GEMM, 2,048-token chunks, oneDNN prefix SDPA |
-| KV cache | FP8 E4M3, 4 GiB + 16 MiB |
-| Serving | Text and tools, one sequence, TP1, native XPU decode graphs, validated prefix reuse |
-| API | `http://127.0.0.1:8093/v1`, model `inkling2-mini-exl3-b70` |
+| Hardware | One Arc Pro B70, 32 GB. Standard card limit 180 W. |
+| Model | 4-bit EXL3 experts, BF16 dense weights. [Pinned checkpoint](https://huggingface.co/grant-ai/Inkling-2-Mini-EXL3-4bpw/tree/c266f76b68429255e1d6ec151d0aa15f48f6abcc) |
+| Runtime | vLLM 0.33.0 and PyTorch 2.15.0+xpu |
+| Context and cache | 262,144 input and output tokens combined, FP8 KV, automatic prefix reuse |
+| Serving | One active sequence, 6,144-token prefill chunks, up to seven DSpark proposals per round |
+| API | Chat, images, streamed tool calls and completions at `http://127.0.0.1:8093/v1`. Model ID `inkling2-mini-exl3-b70`. |
 
-## Coding-agent performance
+## Long-context performance at 180 W
 
-These measurements use one 32 GB Arc Pro B70, one active request and the full 262,144-token server profile with tool support and prefix reuse. The target uses four-bit EXL3 expert weights. DSpark proposes three tokens and vLLM verifies them as a block.
+One client reviewed frozen source files and generated 1,024 tokens per request. At **77,274 actual input tokens**, the median was **2,822 input tok/s** and **74.5 output tok/s**. The longest request in the sweep took **230,861 input tokens** and reached **51.1 output tok/s**. The chart gives the actual Inkling token count beneath each reference budget.
 
-With medium reasoning and a cumulative 8,192-token budget, two 5K code prompts reached 59.16 and 58.82 client tok/s in ordinary mode, up from 58.14 and 57.77. The rebuilt DSpark profile with fused draft taps reached 84.59 and 83.66 on those prompts. At 196,608 input tokens, ordinary measured 1,394 prefill / 43.22 decode tok/s and fused DSpark measured 1,389 / 64.71. Both cold requests retrieved the code. On two cold source prompts of about 232K tokens, fused DSpark reached 76.73 and 68.21 client decode tok/s with 1,312–1,316 prefill tok/s. The coding profile uses 128 target partitions for four verification rows from 196,608 tokens. Set `INKLING2_DSPARK_LONG_SPLITS=0` to compare the old schedule and `INKLING2_DRAFT_FUSED_TAPS=0` to compare the tensor implementation of the draft input mix. [Five-experiment study, task times and reproduction commands](benchmarks/2026-11-21/agent-tuning/README.md)
+![Inkling single-client context sweep at 180 W. Cold prefill, active decode, first-token latency and repeated prefix hits across nine prompt sizes.](benchmarks/2026-11-23/serving/inkling-single-client-sweep.png)
 
-On the four original editing cases with medium reasoning, fused DSpark and the matched tensor implementation both solved all four, in 190.27 and 206.34 s respectively. For the measured coding panel, start `INKLING2_DSPARK_ADAPTIVE=1 bash scripts/serve-coding-agent.sh dspark`. The adaptive verifier completed the same four in 174.19 s and all four harder cases in 452.83 s. Fixed-width fused DSpark solved three of the four harder cases in 566.55 s. The 192K and 232K figures above use fixed-width verification. The archived Qwen run solved them in 145.88 s. Fused Inkling generated 16,219 tokens across tool turns versus 8,130 for Qwen. [Matched task runs and thinking-budget checks](benchmarks/2026-11-21/agent-tuning/README.md)
+The full serving benchmark covers 20 scenarios and 124 requests, including concurrent clients. A separate capacity check filled the full window with 262,016 input and 128 output tokens. [Full serving results and Qwen comparison](benchmarks/2026-11-23/serving/README.md) · [Maximum-context check](benchmarks/2026-11-23/prefill-180w/README.md) · [Prefix-cache fix](benchmarks/2026-11-23/prefix-cache/README.md)
 
-### Earlier reference runs
+## Peak throughput at 230 W
 
-| Frozen source review | Ordinary client tok/s | DSpark client tok/s | Archived Qwen client tok/s |
-| --- | ---: | ---: | ---: |
-| ~5K Inkling input tokens | 58.1 | 82.6 | 60.6 |
-| ~77K Inkling input tokens | 50.6 | 64.9 | 53.3 |
-| ~155K Inkling input tokens | 44.3 | 56.7 | 44.6 |
-
-Each median covers three reviews of the same source text as Qwen’s archived 4K, 64K and 128K cases. Each run produced 1,024 outputs at temperature 1, top-p 0.95 and top-k 20. Client decode timing starts with the first streamed output. The source-review text has no correctness grade.
-
-| Coding tasks (four runs per row) | Hidden suites passed | Total wall time (s) | Generated tokens |
-| --- | ---: | ---: | ---: |
-| Inkling ordinary, original fixtures, none | 4/4 | 154.8 | 8,149 |
-| Inkling DSpark, original fixtures, none | 4/4 | 113.7 | 9,454 |
-| Inkling ordinary, original fixtures, medium | 4/4 | 304.3 | 17,139 |
-| Inkling DSpark, original fixtures, medium | 4/4 | 194.2 | 16,361 |
-| Archived Qwen, original fixtures, medium | 4/4 | 145.9 | 8,130 |
-| Inkling ordinary, held-out fixtures, none | 1/4 | 312.1 | 17,182 |
-| Inkling DSpark, held-out fixtures, none | 1/4 | 232.3 | 19,145 |
-
-The original fixtures cover range-set editing and dependency planning. The held-out fixtures cover routing and a streaming codec. Task times include tool calls and failed attempts. Medium runs request an 8,192-token thinking budget and a 16,384-token output limit. [Per-task results and test settings](benchmarks/2026-11-21/agent-decode/README.md)
-
-| Cold logbook prompt | Ordinary prefill / decode (tok/s) | DSpark prefill / decode (tok/s) |
-| --- | ---: | ---: |
-| 4,096 input + 128 output | 1866.7–1868.1 / 59.9–59.9 | 1844.5–1844.7 / 106.7–114.8 |
-| 196,608 input + 128 output | 1,390 / 42.5 | 1,381 / 57.3 |
-| 262,016 input + 128 output | 1,290 / 37.3 | 1,285 / 40.6 |
-
-The logbook timings come from vLLM’s native counters. Each 4K row spans two warm-engine requests with separate cold prompts. The 262,016-token prompt plus 128 outputs fills the advertised context. Each prompt asks for an embedded seven-digit code.
-
-Ordinary reused 196,608 prompt tokens after the client discarded its first continuation. First output arrived in 0.40 s with reuse and 143.4 s with a fresh cache salt. The reuse run missed the code. The fresh-salt follow-up missed it.
-
-DSpark reused 196,608 prompt tokens after the client discarded its first continuation. First output arrived in 0.88 s with reuse and 142.2 s with a fresh cache salt. The reuse run retrieved the code. The fresh-salt follow-up missed it.
-
-Retrieval on the initial cold 192K and 256K requests (ordinary: 2/2, dspark: 2/2).
-
-[Raw context measurements](benchmarks/2026-11-21/agent-decode/context.json) · [Source-review measurements](benchmarks/2026-11-21/agent-decode/source-review.json) · [Previous public checkpoint](benchmarks/2026-11-21/agent-decode/checkpoint-smoke.json)
-
-## Original prefill measurements
-
-Measured on November 21, 2026 with one request at a time and 128 completion
-tokens. The A/B rows use the same tokenized prompts. The 4K row is the second
-control request. The 256K row fills the context with 262,016 input tokens
-and 128 output tokens.
-
-| Context | ESIMD prefill tok/s | Hybrid oneDNN prefill tok/s | Hybrid decode tok/s |
-| --- | ---: | ---: | ---: |
-| 4K | 1,847 | 1,866 | 20.1 |
-| 32K | 1,652–1,661 | 1,718–1,755 | 20.0 |
-| 192K | 953 | **1,393** | 19.3 |
-| 256K | — | **1,290** | 19.2 |
-
-At 192K, hybrid attention reduced prefill time from 206.33 s to 141.15 s
-(+46.2% throughput). It was inactive at 4K because that prompt had no eligible
-8,192-token prefix block. The 192K and 256K requests retrieved a validation
-code inserted in the middle of a synthetic prompt. [Method and raw measurements](benchmarks/2026-11-21/README.md)
+With **8,192 uncached input tokens**, median engine prefill rose from **3,281 tok/s at 180 W** to **3,656 tok/s at 230 W** over 12 runs per limit. The fastest decode was **199.9 tok/s** expanding a synthetic zero matrix. Updating 64 API routes reached **166.7 tok/s**. [Peak chart](benchmarks/2026-11-23/serving/inkling-peak-throughput.png) · [Measurements, prompts and engine settings](benchmarks/2026-11-23/peak-throughput/README.md)
 
 ## Build and serve
 
-Start with the [setup instructions](docs/SETUP.md) for container images, device
-selection and checkpoint downloads. The exact reference image IDs correspond
-to the local artifacts from the
-[Qwen B70 recipe](https://github.com/Danmoreng/intel-b70-qwen38-vllm/tree/0356a370da5f73f6b0a4eab613d7103a2356b513).
-The setup also describes a source-build option for a new machine.
+Start with Linux, Docker and a working B70 render node. Follow the setup guide to prepare the builder and runtime images and download the pinned EXL3 weights. Power limits are set on the host. [Setup and checkpoint download](docs/SETUP.md)
 
-From the repository root, after preparing the images and checkpoint:
+From the repository root, build and check the kernels once, then launch the optimized profile with vision enabled.
 
 ```bash
 bash scripts/check-sycl.sh
@@ -146,48 +37,28 @@ bash scripts/check-sycl.sh exl3
 INKLING2_EXL3_TILE_ROWS=32 bash scripts/check-sycl.sh exl3 --tokens 256 512
 INKLING2_EXL3_TILE_ROWS=32-64 bash scripts/check-sycl.sh exl3 --small-dpas --tokens 4 7 8 47 2047 2048 2129 6144
 bash scripts/check-sycl.sh paged-fused
-
 bash scripts/build-loop-control.sh
-bash scripts/serve-coding-agent.sh dspark
+
+INKLING2_PREFILL_PROFILE=optimized INKLING2_VISION=1 INKLING2_VISION_FUSED_QKV=1 \
+  bash scripts/serve-coding-agent.sh dspark
 ```
 
-In a second terminal, check readiness and run a short benchmark:
+Once the server is ready, check it from a second terminal.
 
 ```bash
 curl -fsS http://127.0.0.1:8093/health
-python3 scripts/bench-sycl-baseline.py --url http://127.0.0.1:8093 \
-  --vllm-model inkling2-mini-exl3-b70 --lengths 4096 --replicates 2 \
-  --timeout 90 --output results/vllm-4k.jsonl
+curl -fsS http://127.0.0.1:8093/v1/models
 ```
 
-Use `bash scripts/serve-coding-agent.sh ordinary` to run the same endpoint
-with ordinary decoding. Both modes support the OpenAI-compatible chat and
-completion endpoints, including automatic tool calls on chat requests.
-The 262,144-token limit includes the generated continuation.
+The same launcher accepts `ordinary` for decoding without a drafter. A separate llama.cpp recipe runs the Unsloth GGUF checkpoint. [llama.cpp setup](docs/SETUP.md#llamacpp-and-dspark)
 
-For the earlier GGUF comparison, the llama.cpp recipe measured 33.3 tok/s
-with DSpark and 26.5 tok/s with ordinary decode at 4K.
-[llama.cpp build and launch commands](docs/SETUP.md#llamacpp-and-dspark)
+## Coding and vision results
 
-## How the kernels work
+| Workload | Result |
+| --- | --- |
+| Ten blind Pi coding repairs | Adaptive Inkling passed 7/10 and returned all seven before the deadline. [Tasks, grading and Qwen comparison](benchmarks/2026-11-22/quality/README.md) |
+| Long-context Django repair | Both seeds passed from 240,518 initial tokens with Pi retaining 4,096 recent tokens during compaction. [Settings and test results](benchmarks/2026-11-22/quality/long-pi.md) |
+| Screenshots and tools | A Pi browser session read a randomized screenshot. A separate image-and-text request retrieved its target at 240,006 input tokens. [Vision checks](benchmarks/2026-11-22/vision/README.md) |
+| Three Vue apps built with Pi | Inkling passed 43/44 browser and build checks on first submission. Qwen passed 42/44. [Results and screenshots](benchmarks/2026-11-23/pi-browser-comparison/README.md) |
 
-- The [EXL3 patch](patches/trellis-inkling-exl3-mcg-situ.patch) adds the MCG
-  codebook and Inkling's SiTU activation to Trellis. The grouped prefill
-  kernel decodes 4-bit expert weights into XMX tiles. The tuned recipe uses
-  32 activation rows per tile.
-- The [paged attention patch](patches/trellis-vllm-block-table.patch) lets
-  the SYCL decode kernel read vLLM's physical KV pages in BF16 or FP8 E4M3.
-  The vLLM adapter keeps the per-visit sliding-window and convolution state
-  in device rings. Some supporting operations use XPU Triton.
-- The [hybrid prefill](inkling_xpu/prefix_attention.py) reuses the
-  [Qwen oneDNN operator](https://github.com/Danmoreng/intel-b70-qwen38-vllm/blob/0356a370da5f73f6b0a4eab613d7103a2356b513/engine/direct-xpu/runtime/csrc/exl3_ops.sycl)
-  for older keys that are visible to every query and outside Inkling's
-  relative-bias band. The ESIMD kernel handles the causal tail, relative
-  bias and attention sink. The adapter merges the outputs using FP32
-  softmax normalizers. Set `INKLING2_ONEDNN_PREFIX_BLOCK=0` for the full ESIMD
-  control. The optional W8A8 experiment targets dense projections and gave
-  comparable throughput to BF16 at 16K.
-
-Kernel sources are pinned to [Trellis Serve](https://github.com/sybil-solutions/trellis-serve/tree/8f8e2fccf0c82c9715b774812f30d9d52f78a5fb)
-and [Unsloth llama.cpp](https://github.com/unslothai/llama.cpp/releases/tag/b12588-mix-c0c3de8).
-Model files and built images are obtained separately. [Third-party notices](NOTICE.md)
+[Benchmark archive](benchmarks/) · [Kernel patches](patches/) · [Third-party notices](NOTICE.md)

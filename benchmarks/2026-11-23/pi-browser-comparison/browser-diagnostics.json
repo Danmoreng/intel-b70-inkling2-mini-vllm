@@ -1,0 +1,202 @@
+{
+  "support": {
+    "support-inkling": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "horizontalOverflow": false
+      },
+      "detail-retry-visible-ui": {
+        "name": "detail-retry-visible-ui",
+        "completed": true,
+        "visibleError": [
+          "Ticket konnte nicht geladen werdenDetailabruf vorübergehend fehlgeschlagen. Erneut versuchen "
+        ],
+        "selected": "T006"
+      },
+      "conflict-real-ui": {
+        "name": "conflict-real-ui",
+        "completed": true,
+        "alert": [
+          "Konflikt: Das Ticket wurde zwischenzeitlich von einer anderen Stelle geändert. Dein Entwurf wurde nicht gespeichert. Lade den Serverstand, um weiter zu arbeiten. Serverstand laden",
+          "Ticket wurde zwischenzeitlich geändert. Bitte Serverstand laden."
+        ],
+        "saveDisabled": true,
+        "noPrematureComment": true,
+        "commentCount": 1,
+        "assignee": "Ben"
+      },
+      "navigate-while-saving": {
+        "name": "navigate-while-saving",
+        "completed": true,
+        "selectedAfterClick": "T002",
+        "listed": "T002\nMittel\nExport dauert zu lange\nJonas Wolf\nErledigt\nBen",
+        "actualStatus": "resolved",
+        "actualAssignee": "Ben",
+        "actualComment": 1
+      },
+      "select-low-ticket": {
+        "name": "select-low-ticket",
+        "completed": true,
+        "scrollY": 0,
+        "detailTop": 78.6875,
+        "detailVisibleWithoutScrolling": true
+      }
+    },
+    "support-27b": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "horizontalOverflow": false
+      },
+      "detail-retry-visible-ui": {
+        "name": "detail-retry-visible-ui",
+        "completed": true,
+        "visibleError": [
+          "Ticket konnte nicht geladen werden.Detailabruf vorübergehend fehlgeschlagen. Erneut versuchen "
+        ],
+        "selected": "T006"
+      },
+      "conflict-real-ui": {
+        "name": "conflict-real-ui",
+        "completed": true,
+        "alert": [
+          "Ticket wurde zwischenzeitlich geändert. Bitte Serverstand laden."
+        ],
+        "saveDisabled": true,
+        "noPrematureComment": true,
+        "commentCount": 1,
+        "assignee": "Ben"
+      },
+      "navigate-while-saving": {
+        "name": "navigate-while-saving",
+        "completed": true,
+        "selectedAfterClick": "T003",
+        "listed": "T002\nIn Bearbeitung\nMittel\nExport dauert zu lange\nJonas Wolf · Anna",
+        "actualStatus": "resolved",
+        "actualAssignee": "Ben",
+        "actualComment": 1
+      },
+      "select-low-ticket": {
+        "name": "select-low-ticket",
+        "completed": true,
+        "scrollY": 635,
+        "detailTop": -522,
+        "detailVisibleWithoutScrolling": false
+      }
+    }
+  },
+  "finance": {
+    "finance-inkling": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "horizontalOverflow": false
+      },
+      "stable-sort": {
+        "name": "stable-sort",
+        "completed": true,
+        "asc": [
+          "row-B001",
+          "row-B005",
+          "row-B009"
+        ],
+        "desc": [
+          "row-B001",
+          "row-B005",
+          "row-B009"
+        ],
+        "stable": true
+      },
+      "native-storage": {
+        "valid_rows_retained": 0,
+        "invalid_rows_retained": 0,
+        "foreign_key": "keep",
+        "quota_row_visible_before_reload": true,
+        "quota_row_count_after_reload": 0,
+        "visible_messages_before_reload": [
+          "Speichern im Browser fehlgeschlagen – Änderungen gingen beim Neuladen verloren.",
+          "Import abgeschlossen"
+        ]
+      }
+    },
+    "finance-27b": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "horizontalOverflow": false
+      },
+      "stable-sort": {
+        "name": "stable-sort",
+        "completed": true,
+        "asc": [
+          "row-B001",
+          "row-B005",
+          "row-B009"
+        ],
+        "desc": [
+          "row-B009",
+          "row-B005",
+          "row-B001"
+        ],
+        "stable": false
+      },
+      "native-storage": {
+        "valid_rows_retained": 1,
+        "invalid_rows_retained": 1,
+        "foreign_key": "keep",
+        "quota_row_visible_before_reload": true,
+        "quota_row_count_after_reload": 0,
+        "visible_messages_before_reload": [
+          "Import abgeschlossen: 1 hinzugefügt, 0 doppelt/übersprungen, 0 fehlerhaft."
+        ]
+      }
+    }
+  },
+  "kanban": {
+    "kanban-inkling": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "tagsEditable": true,
+        "title": "Navigation vereinfachen",
+        "focusEscapedDialog": true
+      },
+      "mouse-drag-v2": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "fresh",
+            "passed": true
+          },
+          {
+            "name": "after-undo-and-reload",
+            "passed": true
+          }
+        ]
+      }
+    },
+    "kanban-27b": {
+      "visual": {
+        "name": "visual",
+        "completed": true,
+        "tagsEditable": false,
+        "title": "Navigation vereinfachen",
+        "focusEscapedDialog": false
+      },
+      "mouse-drag-v2": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "fresh",
+            "passed": true
+          },
+          {
+            "name": "after-undo-and-reload",
+            "passed": true
+          }
+        ]
+      }
+    }
+  }
+}

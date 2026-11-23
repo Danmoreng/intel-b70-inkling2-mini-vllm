@@ -1,0 +1,23 @@
+{
+  "model": "inkling2-mini-exl3-b70",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Change FORMAT_VERSION to 2 and extend this default grid from 4 to 16 rows of 16 zeros. The generated file format requires all sixteen tuples written out literally as in the input, without comprehensions, multiplication or a helper. Return the complete Python module.\n\nFORMAT_VERSION = 1\n\nEMPTY_GRID = (\n    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),\n    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),\n    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),\n    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),\n)\n"
+    }
+  ],
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "reasoning_effort": "none",
+  "chat_template_kwargs": {
+    "reasoning_effort": "none"
+  },
+  "thinking_token_budget": 0,
+  "temperature": 0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "seed": 301,
+  "max_tokens": 2800
+}

@@ -4,6 +4,8 @@ The November 23 Inkling run replays the November 14 Qwen EXL3 R12 release worklo
 
 ## Reading the figures
 
+[Inkling single-client sweep and post-fix prefix reuse on one chart](inkling-single-client-sweep.png) · [Separate peak throughput benchmark at 180 and 230 W](../peak-throughput/README.md)
+
 ![Cold single-client prefill, decode, first-token latency and warm-prefix latency on both engines](serving-context.png)
 
 ![Prefill, decode, queue time and delivered output at one through four simultaneous clients](serving-concurrency.png)

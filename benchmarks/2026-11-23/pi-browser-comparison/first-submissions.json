@@ -1,0 +1,971 @@
+{
+  "finance": {
+    "base_tree": "ac559d9ab20f040c39068c99d73b05a569c0b394",
+    "qwen_historical": {
+      "tree": "ac559d9ab20f040c39068c99d73b05a569c0b394",
+      "qwen_seed_revision": "adfdf255cbdc2a403d16e7c8af27a5d8fd981372",
+      "qwen_elapsed_s": 906.7919998168945,
+      "model": "Qwen3.8-27B",
+      "archive_run": "0e1fbb72-05fe-4f8f-82cd-711588f5e597",
+      "first_submission_seconds": 906.792,
+      "stored_screenshots": 15,
+      "distinct_screenshots": 15,
+      "accepted": true,
+      "passed": 16,
+      "total": 16,
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Initial twelve transactions and correct cent KPIs",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Month, category, search combine consistently",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Real chart with readable category amounts",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Empty filter clears rows and all KPIs",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Amount sorts numerically in both directions",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Mixed CSV imports three, skips two, rejects three",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Import repeat is idempotent",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Bad header does not erase existing bookings",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Unknown valid CSV values parsed rather than hardcoded",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Export filtered data and correct CSV escaping",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Reload retains imported data and sums",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Corrupt storage recovers and preserves unrelated key",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "pi_usage": {
+        "output": 38259,
+        "reasoning_reported": 17671,
+        "turns": 47,
+        "tool_errors": 3,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.6803134650035645
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.23024123500363203
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 4.173929252996459
+        }
+      ]
+    },
+    "inkling": {
+      "status": "completed",
+      "seconds": 789.323,
+      "revision": "442b5771d2c468268809fe53b7c22fe3873738fa",
+      "passed": 16,
+      "total": 16,
+      "accepted": true,
+      "protected_changed": [],
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Initial twelve transactions and correct cent KPIs",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Month, category, search combine consistently",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Real chart with readable category amounts",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Empty filter clears rows and all KPIs",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Amount sorts numerically in both directions",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Mixed CSV imports three, skips two, rejects three",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Import repeat is idempotent",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Bad header does not erase existing bookings",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Unknown valid CSV values parsed rather than hardcoded",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Export filtered data and correct CSV escaping",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Reload retains imported data and sums",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Corrupt storage recovers and preserves unrelated key",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "screenshots": 11,
+      "matched_screenshot_hashes": 11,
+      "image_requests": 20,
+      "external_requests": 47,
+      "http_errors": [],
+      "engine_delta": {
+        "generation_tokens_total": 48465.0,
+        "mm_cache_hits_total": 28.0,
+        "mm_cache_queries_total": 39.0,
+        "request_decode_time_seconds_sum": 553.9891677139949,
+        "request_prefill_time_seconds_sum": 217.00816009200753,
+        "spec_decode_num_accepted_tokens_total": 32927.0,
+        "spec_decode_num_draft_tokens_total": 54695.0,
+        "spec_decode_num_drafts_total": 15577.0
+      },
+      "accepted_draft_tokens_on_image_requests": 7048.0,
+      "max_request_input": 64638,
+      "compaction": {
+        "enabled": true,
+        "reserveTokens": 16384,
+        "keepRecentTokens": 4096
+      },
+      "pi_usage": {
+        "output": 48465,
+        "reasoning_reported": 17733,
+        "turns": 47,
+        "tool_errors": 1,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.6902361760003259
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.23089595299825305
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 4.203890992997913
+        }
+      ],
+      "wire_by_response_tool": {
+        "other_tool": {
+          "turns": 33,
+          "spec_decode_num_drafts_total": 12920.0,
+          "spec_decode_num_accepted_tokens_total": 29782.0,
+          "spec_decode_num_draft_tokens_total": 48740.0,
+          "generation_tokens_total": 42672.0,
+          "mm_cache_queries_total": 14.0,
+          "mm_cache_hits_total": 10.0,
+          "request_prefill_time_seconds_sum": 83.2768685290066,
+          "request_decode_time_seconds_sum": 469.5091391349979
+        },
+        "browser_tool": {
+          "turns": 13,
+          "spec_decode_num_drafts_total": 2287.0,
+          "spec_decode_num_accepted_tokens_total": 2880.0,
+          "spec_decode_num_draft_tokens_total": 5115.0,
+          "generation_tokens_total": 5158.0,
+          "mm_cache_queries_total": 23.0,
+          "mm_cache_hits_total": 16.0,
+          "request_prefill_time_seconds_sum": 133.61276850600007,
+          "request_decode_time_seconds_sum": 72.60166435899737
+        },
+        "no_tool": {
+          "turns": 1,
+          "spec_decode_num_drafts_total": 370.0,
+          "spec_decode_num_accepted_tokens_total": 265.0,
+          "spec_decode_num_draft_tokens_total": 840.0,
+          "generation_tokens_total": 635.0,
+          "mm_cache_queries_total": 2.0,
+          "mm_cache_hits_total": 2.0,
+          "request_prefill_time_seconds_sum": 0.11852305700085708,
+          "request_decode_time_seconds_sum": 11.87836421999964
+        }
+      },
+      "wire_completion_tokens": 48465,
+      "prefix_reuse": {
+        "with_image_history": {
+          "turns": 20,
+          "zero_cached": 11,
+          "total_input_across_turns": 1125080,
+          "cached_input": 512000,
+          "prefill_s": 209.37963060200855,
+          "decode_s": 174.62226311099403
+        },
+        "text_only": {
+          "turns": 27,
+          "zero_cached": 1,
+          "total_input_across_turns": 811472,
+          "cached_input": 794992,
+          "prefill_s": 7.628529489998982,
+          "decode_s": 379.3669046030009
+        },
+        "changed_image_history": {
+          "turns": 13,
+          "zero_cached": 11,
+          "total_input_across_turns": 707530,
+          "cached_input": 98240,
+          "prefill_s": 207.10185556200122,
+          "decode_s": 128.51396461599688
+        },
+        "same_image_history": {
+          "turns": 7,
+          "zero_cached": 0,
+          "total_input_across_turns": 417550,
+          "cached_input": 413760,
+          "prefill_s": 2.2777750400073273,
+          "decode_s": 46.10829849499714
+        }
+      }
+    }
+  },
+  "kanban": {
+    "base_tree": "0793d346b1e6d4f4599e442069c12a56803d87dc",
+    "qwen_historical": {
+      "tree": "0793d346b1e6d4f4599e442069c12a56803d87dc",
+      "qwen_seed_revision": "7242a51cd4e2b30bb5cbff415f4552afe43dfd6b",
+      "qwen_elapsed_s": 1224.2590000629425,
+      "model": "Qwen3.8-27B",
+      "archive_run": "d3c3c5f0-5ebe-47d2-96a4-b54206da4cd6",
+      "first_submission_seconds": 1224.259,
+      "stored_screenshots": 25,
+      "distinct_screenshots": 25,
+      "accepted": true,
+      "passed": 15,
+      "total": 15,
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Twelve real initial cards in three columns",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Search includes descriptions",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Combined filters and empty state",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Reject whitespace-only title without creating a card",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Create actual card with all fields",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Cancel edit leaves original unchanged",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Status alternative moves card without duplicate",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Undo restores movement and persists it",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Drag card to another real column",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Delete and undo deletion",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Corrupt own storage recovers without deleting foreign keys",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "pi_usage": {
+        "output": 46881,
+        "reasoning_reported": 21360,
+        "turns": 76,
+        "tool_errors": 2,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.7226432820025366
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.35201468099694466
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 3.4740231659961864
+        }
+      ]
+    },
+    "inkling": {
+      "status": "completed",
+      "seconds": 976.687,
+      "revision": "828c24d4431cae2a92768ee78f4c166d1b18fcd8",
+      "passed": 15,
+      "total": 15,
+      "accepted": true,
+      "protected_changed": [],
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Twelve real initial cards in three columns",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Search includes descriptions",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Combined filters and empty state",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Reject whitespace-only title without creating a card",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Create actual card with all fields",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Cancel edit leaves original unchanged",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Status alternative moves card without duplicate",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Undo restores movement and persists it",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Drag card to another real column",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Delete and undo deletion",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Corrupt own storage recovers without deleting foreign keys",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "screenshots": 28,
+      "matched_screenshot_hashes": 28,
+      "image_requests": 38,
+      "external_requests": 68,
+      "http_errors": [],
+      "engine_delta": {
+        "generation_tokens_total": 40315.0,
+        "mm_cache_hits_total": 46.0,
+        "mm_cache_queries_total": 74.0,
+        "request_decode_time_seconds_sum": 455.9951830419959,
+        "request_prefill_time_seconds_sum": 492.1995605479933,
+        "spec_decode_num_accepted_tokens_total": 27709.0,
+        "spec_decode_num_draft_tokens_total": 46626.0,
+        "spec_decode_num_drafts_total": 12652.0
+      },
+      "accepted_draft_tokens_on_image_requests": 4528.0,
+      "max_request_input": 55254,
+      "compaction": {
+        "enabled": true,
+        "reserveTokens": 16384,
+        "keepRecentTokens": 4096
+      },
+      "pi_usage": {
+        "output": 40315,
+        "reasoning_reported": 12755,
+        "turns": 68,
+        "tool_errors": 2,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.7311208930004796
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.3658651820005616
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 3.6560868589986057
+        }
+      ],
+      "wire_by_response_tool": {
+        "other_tool": {
+          "turns": 25,
+          "spec_decode_num_drafts_total": 5544.0,
+          "spec_decode_num_accepted_tokens_total": 9983.0,
+          "spec_decode_num_draft_tokens_total": 17274.0,
+          "generation_tokens_total": 15508.0,
+          "mm_cache_queries_total": 13.0,
+          "mm_cache_hits_total": 9.0,
+          "request_prefill_time_seconds_sum": 74.44688474599752,
+          "request_decode_time_seconds_sum": 184.35539730299934
+        },
+        "write_or_edit": {
+          "turns": 12,
+          "spec_decode_num_drafts_total": 5931.0,
+          "spec_decode_num_accepted_tokens_total": 15620.0,
+          "spec_decode_num_draft_tokens_total": 25758.0,
+          "generation_tokens_total": 21544.0,
+          "mm_cache_queries_total": 2.0,
+          "mm_cache_hits_total": 2.0,
+          "request_prefill_time_seconds_sum": 2.1686468460029573,
+          "request_decode_time_seconds_sum": 229.80302060400209
+        },
+        "browser_tool": {
+          "turns": 30,
+          "spec_decode_num_drafts_total": 946.0,
+          "spec_decode_num_accepted_tokens_total": 1854.0,
+          "spec_decode_num_draft_tokens_total": 2961.0,
+          "generation_tokens_total": 2781.0,
+          "mm_cache_queries_total": 57.0,
+          "mm_cache_hits_total": 33.0,
+          "request_prefill_time_seconds_sum": 415.4470143929939,
+          "request_decode_time_seconds_sum": 34.0778422619951
+        },
+        "no_tool": {
+          "turns": 1,
+          "spec_decode_num_drafts_total": 231.0,
+          "spec_decode_num_accepted_tokens_total": 252.0,
+          "spec_decode_num_draft_tokens_total": 633.0,
+          "generation_tokens_total": 482.0,
+          "mm_cache_queries_total": 2.0,
+          "mm_cache_hits_total": 2.0,
+          "request_prefill_time_seconds_sum": 0.13701456299895654,
+          "request_decode_time_seconds_sum": 7.758922872999392
+        }
+      },
+      "wire_completion_tokens": 40315,
+      "prefix_reuse": {
+        "with_image_history": {
+          "turns": 38,
+          "zero_cached": 28,
+          "total_input_across_turns": 1939436,
+          "cached_input": 506768,
+          "prefill_s": 484.5700519639977,
+          "decode_s": 98.98635868599376
+        },
+        "text_only": {
+          "turns": 30,
+          "zero_cached": 1,
+          "total_input_across_turns": 885361,
+          "cached_input": 872528,
+          "prefill_s": 7.62950858399563,
+          "decode_s": 357.00882435600215
+        },
+        "changed_image_history": {
+          "turns": 30,
+          "zero_cached": 28,
+          "total_input_across_turns": 1524331,
+          "cached_input": 92208,
+          "prefill_s": 483.32308672900035,
+          "decode_s": 57.05436007599201
+        },
+        "same_image_history": {
+          "turns": 8,
+          "zero_cached": 0,
+          "total_input_across_turns": 415105,
+          "cached_input": 414560,
+          "prefill_s": 1.246965234997333,
+          "decode_s": 41.931998610001756
+        }
+      }
+    }
+  },
+  "support": {
+    "base_tree": "9a9e44a651072ef1b1508a7ae4b197f90c515117",
+    "qwen_historical": {
+      "tree": "9a9e44a651072ef1b1508a7ae4b197f90c515117",
+      "qwen_seed_revision": "07608e0cbcd9c7cf8d818fe610086dc1147353b9",
+      "qwen_elapsed_s": 1184.9260001182556,
+      "model": "Qwen3.8-27B",
+      "archive_run": "90d167e9-b3d3-4cbc-ab18-77c058cbb3db",
+      "first_submission_seconds": 1184.926,
+      "stored_screenshots": 49,
+      "distinct_screenshots": 49,
+      "accepted": false,
+      "passed": 11,
+      "total": 13,
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Initial twelve tickets and combined filters",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Late detail response cannot overwrite newer selection",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Failed detail load has explicit retry that works",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Edit, save, double click yields one real comment",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Unsaved navigation can be cancelled",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Explicit discard then opens selected ticket",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Save failure retains draft and retry commits once",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Conflict is explained without silently overwriting server",
+          "domain": "robustness",
+          "passed": false
+        },
+        {
+          "name": "After conflict reload a new edit saves correctly",
+          "domain": "function",
+          "passed": false
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "pi_usage": {
+        "output": 38217,
+        "reasoning_reported": 20548,
+        "turns": 78,
+        "tool_errors": 3,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.6643186580040492
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.23048934100370388
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 17.47753846300475
+        }
+      ]
+    },
+    "inkling": {
+      "status": "completed",
+      "seconds": 1458.472,
+      "revision": "a63cc45cdd413a76242f7e9a5c125c375409561d",
+      "passed": 12,
+      "total": 13,
+      "accepted": false,
+      "protected_changed": [],
+      "checks": [
+        {
+          "name": "App shell and initial content",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Initial twelve tickets and combined filters",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Late detail response cannot overwrite newer selection",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Failed detail load has explicit retry that works",
+          "domain": "robustness",
+          "passed": false
+        },
+        {
+          "name": "Edit, save, double click yields one real comment",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Unsaved navigation can be cancelled",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Explicit discard then opens selected ticket",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "Save failure retains draft and retry commits once",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Conflict is explained without silently overwriting server",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "After conflict reload a new edit saves correctly",
+          "domain": "function",
+          "passed": true
+        },
+        {
+          "name": "No unhandled browser exceptions",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Desktop has no horizontal document overflow",
+          "domain": "robustness",
+          "passed": true
+        },
+        {
+          "name": "Mobile remains usable at390px",
+          "domain": "function",
+          "passed": true
+        }
+      ],
+      "screenshots": 54,
+      "matched_screenshot_hashes": 54,
+      "image_requests": 94,
+      "external_requests": 114,
+      "http_errors": [],
+      "engine_delta": {
+        "generation_tokens_total": 39023.0,
+        "mm_cache_hits_total": 132.0,
+        "mm_cache_queries_total": 186.0,
+        "request_decode_time_seconds_sum": 460.6228593270116,
+        "request_prefill_time_seconds_sum": 947.194551027982,
+        "spec_decode_num_accepted_tokens_total": 26331.0,
+        "spec_decode_num_draft_tokens_total": 43833.0,
+        "spec_decode_num_drafts_total": 12774.0
+      },
+      "accepted_draft_tokens_on_image_requests": 10103.0,
+      "max_request_input": 58451,
+      "compaction": {
+        "enabled": true,
+        "reserveTokens": 16384,
+        "keepRecentTokens": 4096
+      },
+      "pi_usage": {
+        "output": 39023,
+        "reasoning_reported": 14534,
+        "turns": 114,
+        "tool_errors": 3,
+        "compactions": 0
+      },
+      "steps": [
+        {
+          "name": "typecheck",
+          "exit_code": 0,
+          "seconds": 0.7378227549997973
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 0.23523349100105406
+        },
+        {
+          "name": "browser",
+          "exit_code": 0,
+          "seconds": 14.952339673000097
+        }
+      ],
+      "wire_by_response_tool": {
+        "other_tool": {
+          "turns": 47,
+          "spec_decode_num_drafts_total": 5783.0,
+          "spec_decode_num_accepted_tokens_total": 9881.0,
+          "spec_decode_num_draft_tokens_total": 16346.0,
+          "generation_tokens_total": 15629.0,
+          "mm_cache_queries_total": 67.0,
+          "mm_cache_hits_total": 44.0,
+          "request_prefill_time_seconds_sum": 403.31876483599626,
+          "request_decode_time_seconds_sum": 199.93520070499835
+        },
+        "write_or_edit": {
+          "turns": 7,
+          "spec_decode_num_drafts_total": 4990.0,
+          "spec_decode_num_accepted_tokens_total": 12789.0,
+          "spec_decode_num_draft_tokens_total": 21361.0,
+          "generation_tokens_total": 17774.0,
+          "mm_cache_queries_total": 2.0,
+          "mm_cache_hits_total": 2.0,
+          "request_prefill_time_seconds_sum": 0.9088705479953205,
+          "request_decode_time_seconds_sum": 190.09136886400483
+        },
+        "browser_tool": {
+          "turns": 59,
+          "spec_decode_num_drafts_total": 1713.0,
+          "spec_decode_num_accepted_tokens_total": 3394.0,
+          "spec_decode_num_draft_tokens_total": 5351.0,
+          "generation_tokens_total": 5066.0,
+          "mm_cache_queries_total": 115.0,
+          "mm_cache_hits_total": 84.0,
+          "request_prefill_time_seconds_sum": 542.4155471709892,
+          "request_decode_time_seconds_sum": 60.97417140200923
+        },
+        "no_tool": {
+          "turns": 1,
+          "spec_decode_num_drafts_total": 288.0,
+          "spec_decode_num_accepted_tokens_total": 267.0,
+          "spec_decode_num_draft_tokens_total": 775.0,
+          "generation_tokens_total": 554.0,
+          "mm_cache_queries_total": 2.0,
+          "mm_cache_hits_total": 2.0,
+          "request_prefill_time_seconds_sum": 0.5513684730012756,
+          "request_decode_time_seconds_sum": 9.622118355999191
+        }
+      },
+      "wire_completion_tokens": 39023,
+      "prefix_reuse": {
+        "with_image_history": {
+          "turns": 94,
+          "zero_cached": 57,
+          "total_input_across_turns": 4499303,
+          "cached_input": 1745104,
+          "prefill_s": 929.49565553299,
+          "decode_s": 203.08412669900645
+        },
+        "text_only": {
+          "turns": 20,
+          "zero_cached": 1,
+          "total_input_across_turns": 423631,
+          "cached_input": 405232,
+          "prefill_s": 17.69889549499203,
+          "decode_s": 257.53873262800516
+        },
+        "changed_image_history": {
+          "turns": 59,
+          "zero_cached": 57,
+          "total_input_across_turns": 2822432,
+          "cached_input": 70656,
+          "prefill_s": 923.4244814579906,
+          "decode_s": 142.24640544600334
+        },
+        "same_image_history": {
+          "turns": 35,
+          "zero_cached": 0,
+          "total_input_across_turns": 1676871,
+          "cached_input": 1674448,
+          "prefill_s": 6.071174074999362,
+          "decode_s": 60.83772125300311
+        }
+      }
+    }
+  }
+}
