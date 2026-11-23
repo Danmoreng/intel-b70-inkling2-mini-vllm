@@ -44,7 +44,7 @@ Across **20 scenarios, 70 measured waves and 124 requests**, Inkling delivered *
 | 64K prefix resend, one client | 74,690 | 24.34 s | 58.85 tok/s | 36.17 tok/s |
 | 4K each, four clients | 4,945 | 22.43 s | 83.88 tok/s | 74.98 tok/s |
 
-The workload labels use Qwen's input budgets. Actual inputs use the Inkling tokenizer and show the per-wave mean client length at C4. Table entries are wave medians, with two resends for each prefix. With four simultaneous clients, the scheduler admitted one sequence and queued up to 3. Whole-wave output includes that wait and prefill. Both 16K resends hit the cache. Only the first 64K resend hit in the matrix, and its visible output arrived at the end of generation.
+The workload labels use Qwen's input budgets. Actual inputs use the Inkling tokenizer and show the per-wave mean client length at C4. Table entries are wave medians, with two resends for each prefix. With four simultaneous clients, the scheduler admitted one sequence and queued up to 3. Whole-wave output includes that wait and prefill. Both 16K resends hit the cache. Only the first 64K resend hit in this historical matrix. The current recipe reuses **74,672 of 74,690 tokens on both resends**. On the original 64K follow-up requests, time to first visible text fell from **18.31 / 27.16 s** on a fresh worker to **2.55 / 0.70 s**. [Prefix-cache repair and cold/cached token checks](benchmarks/2026-11-23/prefix-cache/README.md)
 
 ![Single-client prefill, decode and first-token latency on Inkling and Qwen](benchmarks/2026-11-23/serving/serving-context.png)
 

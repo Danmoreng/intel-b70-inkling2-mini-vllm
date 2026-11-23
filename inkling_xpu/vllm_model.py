@@ -20,6 +20,8 @@ from . import packed_kv
 from .exl3_experts import InklingEXL3Experts
 from .paged_attention import decode_paged
 from .prefix_attention import hybrid_prefill
+from .prefix_tail import PrefillTail
+from .ring_prefix import RingPrefix
 from .split_attention import TUNE_VERIFY, local_splits, local_xmx, paged_splits, paged_xmx
 
 
@@ -52,6 +54,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
+        self.saved_tail = None
         self.use_decode_graph = os.environ.get("INKLING2_DECODE_GRAPH", "0") == "1"
         self.decode_graphs = {}
         self.local_xmx = local_xmx if os.environ.get("INKLING2_LOCAL_XMX", "0") == "1" else None
@@ -306,9 +309,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         elif start < self.ring_high - 32:
             if not self.saved_frontier - 32 <= start <= self.saved_frontier:
                 raise RuntimeError("Prefix hit exceeds both retained ring histories")
-            for live, saved in zip(self._ring_buffers(), self.saved_rings, strict=True):
-                live.copy_(saved)
+            self._restore_saved_rings()
             self.ring_high = start
+
+    def _restore_saved_rings(self):
+        for live, saved in zip(self._ring_buffers(), self.saved_rings, strict=True):
+            live.copy_(saved)
 
     def _save_history(self, end):
         if self.saved_rings:
@@ -318,18 +324,37 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             self.saved_rings = [live.clone() for live in self._ring_buffers()]
         self.saved_frontier = end
 
+    def _global_draft_caches(self):
+        if self.want_dspark:
+            yield from (cache for i, cache in enumerate(self.draft.kv) if i not in self.draft.local)
+
     @torch.no_grad()
     def forward(self, input_ids, positions, intermediate_tensors=None, inputs_embeds=None):
         size = positions.numel()
         positions = positions.long()
         batch = self._metadata(size, positions.device)
         real_history = self.enable_ring_prefix and get_forward_context().attn_metadata is not None
-        if real_history:
-            self._restore_history(batch.first_position)
-            self.ring_high = batch.total_tokens
         if self.want_dspark:
             self.active_draft = self.draft if get_forward_context().attn_metadata is not None else None
             self.draft_end = batch.total_tokens
+        if real_history:
+            if (self.saved_tail is not None and inputs_embeds is None and input_ids is not None
+                    and batch.first_position > 0 and batch.first_position < self.ring_high
+                    and batch.total_tokens == self.saved_frontier and size >= RingPrefix.min_snapshot_rows):
+                # vLLM already matched the preceding block hashes (including salt).
+                # Compare the remaining IDs before restoring any request-owned data.
+                hidden = self.saved_tail.restore(input_ids, batch.out_cache_loc, self.page_tokens,
+                                                 batch.total_tokens, batch.caches, self._global_draft_caches())
+                if hidden is not None:
+                    self._restore_saved_rings()
+                    self.ring_high = batch.total_tokens
+                    return hidden
+            # A divergent branch invalidates the association between the saved
+            # outputs and the live request's prefix.
+            if batch.first_position < self.saved_frontier or batch.first_position == 0:
+                self.saved_tail = None
+            self._restore_history(batch.first_position)
+            self.ring_high = batch.total_tokens
         self._static = batch.first_position > 0 and (size in (1, 2, 4, 8) or self.arbitrary_rows and 1 <= size <= 8)
         if self._static:
             if self.use_decode_graph and size in self.capture_rows and inputs_embeds is None:
@@ -341,6 +366,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self._conv_pos_update = []
         self._prepare(batch, reqs, positions, kv_pool=True)
         hidden = self._forward_body(input_ids, positions, batch, reqs, inputs_embeds, return_hidden=True)
-        if real_history and size > 8:
+        if real_history and size >= RingPrefix.min_snapshot_rows:
             self._save_history(batch.total_tokens)
+            self.saved_tail = None
+            if inputs_embeds is None and input_ids is not None and not self.packed_kv:
+                n = min(RingPrefix.slack, size)
+                self.saved_tail = PrefillTail.capture(input_ids[-n:], hidden[-n:], batch.out_cache_loc[-n:],
+                                                     self.page_tokens, batch.total_tokens, batch.caches,
+                                                     self._global_draft_caches())
         return hidden

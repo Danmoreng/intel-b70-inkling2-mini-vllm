@@ -21,6 +21,8 @@ The context labels are the Qwen input budgets. Inkling's tokenizer assigns diffe
 
 The Qwen curves use the original November 14 matrix throughout. Its 2K two-client waves had unusually long stalls. A six-wave repeat the next day gave different latencies. Keeping the dated runs separate preserves the measured whole-matrix total. [Qwen follow-up measurements](https://github.com/Danmoreng/intel-b70-qwen38-vllm/blob/0356a370da5f73f6b0a4eab613d7103a2356b513/benchmarks/results/direct-xpu-followup-20261115/README.md)
 
+The current recipe fixes the 64K prefix behavior measured below. [Post-fix measurements and reproduction](../prefix-cache/README.md)
+
 ## What happened on the 64K prefix
 
 The three matrix requests contain the same 74,690 Inkling input tokens. The second request reused 74,688 tokens and spent 0.032 s in native prefill. Its stream sent an initial role event at 0.116 s, then delivered its visible content together at 21.62 s. The third request recorded zero cached tokens and took 27.07 s to first visible output. The isolated restart reproduced the same cache sequence of 0, 74,688 and 0 reused tokens. Its two resends took 18.31 s and 27.16 s to first visible output. Both 16K resends in the matrix returned visible text in 0.13 s. A fast native cache hit and a fast visible response are separate observations.
