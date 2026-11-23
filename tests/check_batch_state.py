@@ -97,9 +97,36 @@ def check_sampling():
     assert logits[1].isneginf().all(), "Inactive worker slot was overwritten"
 
 
+def check_draft_residency():
+    from inkling_xpu.dspark import InklingDraft
+
+    for dtype in (torch.float16, torch.float8_e4m3fn):
+        draft = InklingDraft.__new__(InklingDraft)
+        draft.local, draft.split_attention, draft.block = {0}, True, 8
+        draft.fp8_global = dtype == torch.float8_e4m3fn
+        draft.max_context, draft.groups, draft.head = 262144, 1, 8
+        draft.f_ring = torch.zeros(1, device="xpu")
+        local = torch.empty(4, device="xpu")
+        data = torch.randn(2, 4096 + 16, 1, 8, device="xpu").to(dtype)
+        draft.kv = [local, data.clone()]
+        draft.graph_state = object()
+        draft.spill_global()
+        assert draft.graph_state is None and draft.resident_rows() == 0
+        assert draft.kv[1].device.type == "cpu"
+        rows = draft.planned_rows(17, 139264)
+        assert 139264 + 8 <= rows <= 139264 + 16384
+        draft.resize_global(17, rows)
+        kept = 32 if draft.fp8_global else 17
+        torch.testing.assert_close(draft.kv[1][:, :kept].view(torch.uint8), data[:, :kept].view(torch.uint8),
+                                   rtol=0, atol=0)
+        assert draft.resident_rows() == rows and draft.kv[0] is local
+        assert draft.planned_rows(139264, 139265) == rows
+
+
 if __name__ == "__main__":
     torch.manual_seed(42)
     torch.ops.load_library(sys.argv[1])
     check_convolutions()
     check_sampling()
-    print("Ragged K/V, output convolutions and all seven per-slot proposal distributions passed.")
+    check_draft_residency()
+    print("Ragged K/V, output convolutions and all seven per-slot proposal distributions passed. Draft KV spill and restore passed.")

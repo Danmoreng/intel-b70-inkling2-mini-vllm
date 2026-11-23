@@ -75,6 +75,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.batch_layout = None
         self.fast_batch = False
         self.batch_graphs = BatchGraphs()
+        self.joint_draft_graphs = {}
         self.trace_batch = os.environ.get("INKLING2_TRACE_BATCH") == "1"
         self.traced_shapes = set()
         self.compare_graph = os.environ.get("INKLING2_COMPARE_GRAPH", "0") == "1"
@@ -411,18 +412,53 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             if self.want_dspark:
                 self.draft = self.drafts[0]
 
+    def _reserve_drafts(self, requests, prompt_lengths):
+        planned = {}
+        long_admission = False
+        for (slot, _, count, start), prompt_len in zip(requests, prompt_lengths, strict=True):
+            end = start + count
+            self.draft_lengths[slot] = end
+            planned[slot] = self.drafts[slot].planned_rows(start, max(end, int(prompt_len)))
+            long_admission |= start == 0 and prompt_len >= 32768
+        resident = [d.resident_rows() for d in self.drafts]
+        if not long_admission and all(n == resident[s] for s, n in planned.items()):
+            return
+        # vLLM accounts for active target pages. Bound inactive global draft
+        # histories independently, keeping one small growth margin per slot.
+        used = sum(planned.get(s, n) for s, n in enumerate(resident))
+        idle = sorted((s for s in range(self.n_slots) if s not in planned), key=resident.__getitem__, reverse=True)
+        spill = []
+        for slot in idle:
+            if used <= self.max_context + self.n_slots * 16384:
+                break
+            if resident[slot]:
+                spill.append(slot)
+                used -= resident[slot]
+        if long_admission or spill:
+            # Captured verification workspaces compete with the transient prefill
+            # tensors. Keep the model weights and request state, release graphs.
+            self.batch_graphs.graphs.clear()
+            self.joint_draft_graphs.clear()
+            for slot, draft in enumerate(self.drafts):
+                self.slot_graphs[slot].clear()
+                draft.graph_state = None
+            for slot in spill:
+                self.drafts[slot].spill_global()
+            torch.xpu.empty_cache()
+        for slot, _, _, start in requests:
+            if planned[slot] != resident[slot]:
+                self.slot_graphs[slot].clear()
+                self.drafts[slot].resize_global(start, planned[slot])
+
     def _batch_forward(self, ids, positions, batch, embeds):
-        owners, slots, offsets = self.inkling_batch
+        owners, slots, offsets, prompt_lengths = self.inkling_batch
         requests = [(int(slot), int(a), int(b - a), length - int(b - a))
                     for slot, a, b, length in zip(slots, offsets[:-1], offsets[1:], batch.lengths, strict=True)]
         if (offsets[-1] != positions.numel() or len(set(slots)) != len(slots)
                 or any(not 0 <= s < self.n_slots or n < 1 or start < 0 for s, _, n, start in requests)):
             raise ValueError("Invalid request-to-ring mapping")
         if self.want_dspark:
-            for slot, _, count, start in requests:
-                self.draft_lengths[slot] = start + count
-                if self.drafts[slot].reserve(start, start + count):
-                    self.slot_graphs[slot].clear()
+            self._reserve_drafts(requests, prompt_lengths)
         is_decode = len(requests) > 1 and all(n == 1 and start > 0 for _, _, n, start in requests)
         if self.trace_batch:
             verify = self.fast_batch and len(requests) > 1 and all(

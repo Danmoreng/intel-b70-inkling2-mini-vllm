@@ -69,7 +69,6 @@ class InklingDraft:
             self.draft_mix_norm = None
         self.warmed = set()
         self.max_context = max_context
-        self.grow_global = grow_global
         self.kv = []
         self.capacities = []
         slack = 64 if os.environ.get("INKLING2_RING_PREFIX", "0") == "1" else self.block * 2
@@ -128,30 +127,47 @@ class InklingDraft:
         other.graph_state = None
         return other
 
-    def reserve(self, start, end):
-        """Grow global draft KV as a slot advances and release surplus on cold reuse."""
-        if not self.grow_global:
-            return False
-        changed = False
+    def resident_rows(self):
+        return max((cache.size(1) for i, cache in enumerate(self.kv)
+                    if i not in self.local and cache.is_xpu), default=0)
+
+    def planned_rows(self, start, end):
+        # Reserve a long prompt once, leaving room for its early decode. Small
+        # prompts keep the original power-of-two buckets without doubling a 139K
+        # prompt to 262K per ring. Row counts include kernel lookahead padding.
+        needed = min(self.max_context, end)
+        if needed <= 16384:
+            capacity = 4096 << (max(1, (needed + 4095) // 4096) - 1).bit_length()
+        else:
+            capacity = ((needed + 512 + 8191) // 8192) * 8192
+        pad = self.block if self.split_attention else 0
+        rows = min(capacity, self.max_context) + pad
+        if self.fp8_global:
+            rows = (rows + 15) // 16 * 16
+        resident = self.resident_rows()
+        if resident >= needed + pad and (start or resident <= rows * 2):
+            return resident
+        return rows
+
+    def spill_global(self):
+        # An idle slot can still provide a legal prefix hit. Keep its exact
+        # draft history on the host until the scheduler reuses the slot.
+        self.graph_state = None
+        for i, cache in enumerate(self.kv):
+            if i not in self.local and cache.is_xpu:
+                self.kv[i] = cache.cpu()
+
+    def resize_global(self, start, rows):
+        self.graph_state = None
         for i, cache in enumerate(self.kv):
             if i in self.local:
                 continue
-            pad = self.block if self.split_attention else 0
-            pages = max(1, (end + 4095) // 4096)
-            capacity = min(self.max_context, 4096 * (1 << (pages - 1).bit_length()))
-            rows = capacity + pad
-            if self.fp8_global:
-                rows = (rows + 15) // 16 * 16
-            if cache.size(1) < end + pad or (start == 0 and cache.size(1) > rows * 2):
-                new = cache.new_empty((2, rows, self.groups, self.head))
-                if start:
-                    # Packed FP8 tiles interleave bytes from sixteen positions.
-                    keep = (start + 15) // 16 * 16 if self.fp8_global else start
-                    new[:, :keep].copy_(cache[:, :keep])
-                self.kv[i] = new
-                self.graph_state = None
-                changed = True
-        return changed
+            new = torch.empty((2, rows, self.groups, self.head), dtype=cache.dtype, device=self.f_ring.device)
+            if start:
+                # Packed FP8 tiles interleave bytes from sixteen positions.
+                keep = (start + 15) // 16 * 16 if self.fp8_global else start
+                new[:, :keep].copy_(cache[:, :keep])
+            self.kv[i] = new
 
     def bind_target_head(self, head):
         if self.shared_head:
@@ -446,7 +462,6 @@ class InklingDSparkSpeculator(BaseSpeculator):
         self.no_proposals = torch.full_like(self.empty, -1)
         self.samplers = []
         self.joint_sampling = None
-        self.joint_graphs = {}
         self.joint_warm = set()
         if config.speculative_config.draft_sample_method == "probabilistic":
             vocab = config.model_config.get_vocab_size()
@@ -482,14 +497,14 @@ class InklingDSparkSpeculator(BaseSpeculator):
             self.joint_warm.add((key, splits))
             out = forward(anchor, starts, indices)
         else:
-            state = self.joint_graphs.get(key)
+            state = self.target.joint_draft_graphs.get(key)
             if state is None or state[0] != signature:
                 buffers = tuple(t.clone() for t in (anchor, starts, indices))
                 graph = torch.xpu.XPUGraph()
                 with torch.xpu.graph(graph):
                     out = forward(*buffers)
                 state = (signature, graph, buffers, out)
-                self.joint_graphs[key] = state
+                self.target.joint_draft_graphs[key] = state
             _, graph, buffers, out = state
             for buf, t in zip(buffers, (anchor, starts, indices), strict=True):
                 buf.copy_(t)

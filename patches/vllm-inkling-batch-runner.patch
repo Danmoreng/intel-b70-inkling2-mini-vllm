@@ -1,6 +1,6 @@
 --- a/v1/worker/gpu/model_runner.py
 +++ b/v1/worker/gpu/model_runner.py
-@@ -2103,6 +2103,14 @@
+@@ -2103,6 +2103,15 @@
                      )
                  else:
                      # Eager (NONE): call the raw model directly.
@@ -9,7 +9,8 @@
 +                        ring_slots = ([slots[rid] for rid in input_batch.req_ids] if slots
 +                                      else input_batch.idx_mapping_np.tolist())
 +                        self.model.inkling_batch = (input_batch.req_ids, ring_slots,
-+                                                    input_batch.query_start_loc_np[:input_batch.num_reqs + 1])
++                                                    input_batch.query_start_loc_np[:input_batch.num_reqs + 1],
++                                                    input_batch.prefill_len_np[:input_batch.num_reqs])
 +                    else:
 +                        self.model.inkling_batch = None
                      model_output = self.model(**model_inputs)

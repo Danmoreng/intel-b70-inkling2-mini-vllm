@@ -35,7 +35,8 @@ class BatchGraphs:
             if key not in self.seen:
                 self.seen.add(key)
                 return model._run_verify(ids, positions, batch, None, tensors, width)
-            if len(self.graphs) >= self.limit:
+            limit = min(4, self.limit) if batch.total_tokens >= 32768 else self.limit
+            while len(self.graphs) >= limit:
                 self.graphs.popitem(last=False)
             buffers = tuple(arg.clone() for arg in args)
             staged = SimpleNamespace(**vars(batch))
