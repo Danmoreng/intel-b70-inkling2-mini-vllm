@@ -59,7 +59,7 @@ if [[ "$mode" == exl3 ]]; then
     mkdir -p .work/python
     ln -sfn ../trellis-serve/xpu/exl3xpu .work/python/inkling_trellis
     tile_rows=${INKLING2_EXL3_TILE_ROWS:-16}
-    case "$tile_rows" in 16|32|48) ;; *) echo 'Use 16, 32 or 48 tile rows.' >&2; exit 2;; esac
+    case "$tile_rows" in 16|32|48|32-48) ;; *) echo 'Use 16, 32, 48 or 32-48 tile rows.' >&2; exit 2;; esac
     lib_name=inkling2-exl3-moe.so
     if [[ "$tile_rows" != 16 ]]; then
         lib_name="inkling2-exl3-moe-mb$tile_rows.so"
@@ -72,6 +72,10 @@ if [[ "$mode" == exl3 ]]; then
         rm -f -- "$output/$lib_name.new"
         patch --silent --batch --fuzz=0 --output="$output/exl3_moe_single.sycl" "$vendor/$source_file" \
             "$PWD/patches/trellis-inkling-exl3-single-row.patch"
+        if [[ "$tile_rows" == 32-48 ]]; then
+            patch --silent --batch --fuzz=0 "$output/exl3_moe_single.sycl" < "$PWD/patches/trellis-inkling-exl3-large-prefill.patch"
+            tile_rows=32
+        fi
         timeout --kill-after=10s 8m docker run --rm --name "$build_name" --network none \
             --cpus 4 --memory 6g --user "$owner" \
             --mount "type=bind,source=$vendor,target=/opt/trellis-serve,readonly" \

@@ -1,0 +1,51 @@
+--- a/exl3_moe_single.sycl
++++ b/exl3_moe_single.sycl
+@@ -902,7 +902,6 @@
+ #endif
+ // larger row blocks (decode each expert's trellis once per MB rows) only for K=4 (NT=2 needs even-K tile pairing)
+ template <int K> constexpr int prefill_mb() { return K == 4 ? EXL3_MOE_PREFILL_MB : 32; }
+-template <int K> constexpr int prefill_nt() { return prefill_mb<K>() >= 48 ? 2 : 4; }
+ 
+ static int tiny_min = 0, tiny_gu = 9, tiny_dn = 18;
+ void moe_set_tiny_dpas(int64_t min_rows, int64_t gu, int64_t dn) {
+@@ -912,12 +911,11 @@
+     tiny_gu = gu;
+     tiny_dn = dn;
+ }
+-template <int K, bool tiny = false>
++template <int K, bool tiny = false, int MB = tiny ? 8 : prefill_mb<K>()>
+ static at::Tensor moe_prefill(const at::Tensor &x, const at::Tensor &topk_ids, const at::Tensor &topk_w,
+                               const at::Tensor &ptrs, const Geom &gm, int E, at::Tensor &out) {
+     auto& q = queue_of(x);
+     int M = x.size(0), H = gm.H, I = gm.I, topk = topk_ids.size(1), npairs = M * topk;
+-    constexpr int MB = tiny ? 8 : prefill_mb<K>();
+     using YT = std::conditional_t<tiny, float, fp16>;
+     const int partitions = tiny ? tiny_dn : down_prefill_parts(H);
+     TORCH_CHECK(gm.K == K && I % 128 == 0 && H % (partitions * 128) == 0 &&
+@@ -933,7 +931,7 @@
+     const int64_t* pp = ptrs.data_ptr<int64_t>();
+     sycl::ext::oneapi::experimental::properties props{sycl::ext::intel::experimental::grf_size<256>};
+     const int gate_parts = tiny ? tiny_gu : H == 2304 && I == 1152 ? 3 : 1;
+-    int T1 = 2 * (I / gate_parts / 16) / prefill_nt<K>();
++    int T1 = 2 * (I / gate_parts / 16) / GateUpDpasKernel<K, MB, bf16>::NT;
+     auto run_gu = [&](auto tag) {
+         using TIn = decltype(tag);
+         GateUpDpasKernel<K, MB, TIn> k{reinterpret_cast<const TIn*>(x.data_ptr()), (int)x.stride(0), pp, rb.rt, rb.blk_a,
+@@ -942,7 +940,7 @@
+         q.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>((size_t)rb.max_blk * gate_parts * T1, T1), props, k); });
+     };
+     if (!(g_debug_skip & 1)) { if (x.scalar_type() == at::kHalf) run_gu(fp16{}); else run_gu(bf16{}); }
+-    int T2 = (H / partitions / 16) / prefill_nt<K>();
++    int T2 = (H / partitions / 16) / DownDpasKernel<K, MB, YT>::NT;
+     DownDpasKernel<K, MB, YT> kd{reinterpret_cast<const fp16*>(ablk.data_ptr()), pp, rb.rt, rb.blk_a, rb.n_blk,
+                                    reinterpret_cast<YT*>(y.data_ptr()), H, I, gm.gu_bytes(), gm.off_svh_d(), partitions};
+     if (!(g_debug_skip & 2))
+@@ -1352,6 +1350,8 @@
+         return moe_prefill<4,true>(x,topk_ids,topk_w,ptrs,gm,E,out);
+     if (M >= g_prefill_min_m) {
+         if (K == 3) return moe_prefill<3>(x, topk_ids, topk_w, ptrs, gm, E, out);
++        if (K == 4 && M >= 2048 && gm.H == 2304 && gm.I == 1152)
++            return moe_prefill<4, false, 48>(x, topk_ids, topk_w, ptrs, gm, E, out);
+         if (K == 4) return moe_prefill<4>(x, topk_ids, topk_w, ptrs, gm, E, out);
+     }
+     bool pair_mode = M <= g_pair_max_m;

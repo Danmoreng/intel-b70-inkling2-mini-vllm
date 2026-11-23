@@ -53,7 +53,12 @@ case ${INKLING2_PREFILL_PROFILE:-reference} in
     *) echo "INKLING2_PREFILL_PROFILE must be optimized or reference" >&2; exit 2 ;;
 esac
 export INKLING2_VLLM_KV_TYPE=fp8_e4m3 INKLING2_EXL3_PAIR_MAX=8
-export INKLING2_EXL3_MOE_LIB=/lab/.work/build/inkling2-exl3-moe-mb32.so
+expert_lib=/lab/.work/build/inkling2-exl3-moe-mb32.so
+large_prefill_lib=/lab/.work/build/inkling2-exl3-moe-mb32-48.so
+if [[ ${INKLING2_PREFILL_PROFILE:-reference} == optimized && -s "${large_prefill_lib#/lab/}" ]]; then
+    expert_lib=$large_prefill_lib
+fi
+export INKLING2_EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-$expert_lib}
 export INKLING2_CONTROL_LIB=/lab/.work/build/inkling2-loop-control.so
 export INKLING2_DECODE_GRAPH=1 INKLING2_FIXED_ROUTER=1 INKLING2_GROUP_CONTROLLERS=1 INKLING2_SYCL_ROUTER=1
 export INKLING2_PAGED_XMX=1 INKLING2_LOCAL_XMX=1 INKLING2_DSPARK_BLOCK=1 INKLING2_DSPARK_GRAPH=1
