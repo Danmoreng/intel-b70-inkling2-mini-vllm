@@ -20,6 +20,7 @@ from vllm.v1.attention.backends.triton_attn import TritonAttentionBackend
 from . import packed_kv
 from .batch_graph import BatchGraphs
 from .exl3_experts import InklingEXL3Experts
+from .iqr_experts import InklingIQRExperts
 from .paged_attention import decode_paged
 from .prefix_attention import hybrid_prefill
 from .prefix_tail import PrefillTail
@@ -120,7 +121,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         moe_ops().moe_set_pair_max_m(int(os.environ.get("INKLING2_EXL3_PAIR_MAX", "8")))
         if os.environ.get("INKLING2_EXL3_SMALL_DPAS") == "1":
             moe_ops().moe_set_tiny_dpas(4, 9, 18)
-        experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
+        # INKLING2_EXPERTS=iqr4 loads GPTQ 4-bit IQR experts (iqr-layer-*.safetensors, iqr_moe library; docs/IQR.md).
+        kind = os.environ.get("INKLING2_EXPERTS", "exl3")
+        if kind not in ("exl3", "iqr4"):
+            raise ValueError(f"INKLING2_EXPERTS must be exl3 or iqr4, not {kind!r}")
+        cls = InklingIQRExperts if kind == "iqr4" else InklingEXL3Experts
+        experts = {layer: cls(self.checkpoint, layer, device, self.tc["n_routed_experts"])
                    for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)
         if self.fuse_local_projection:

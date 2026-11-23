@@ -26,7 +26,13 @@ for lib in "${INKLING2_LIB:-/lab/.work/build/inkling2-vllm.so}" "${INKLING2_EXL3
     fi
 done
 if [[ ${INKLING2_VLLM_DSPARK:-0} == 1 ]]; then
-    test -s models/exl3/mtp.safetensors || { echo "Missing models/exl3/mtp.safetensors" >&2; exit 1; }
+    test -s ${INKLING2_MODEL_DIR:-models/exl3}/mtp.safetensors || { echo "Missing ${INKLING2_MODEL_DIR:-models/exl3}/mtp.safetensors" >&2; exit 1; }
+fi
+if [[ ${INKLING2_EXPERTS:-exl3} == iqr4 ]]; then
+    iqr_lib=${INKLING2_IQR_MOE_LIB:-/lab/.work/build/inkling2-iqr-moe.so}
+    test -s "${iqr_lib#/lab/}" || { echo "Missing ${iqr_lib#/lab/}: run scripts/build-iqr-moe.sh" >&2; exit 1; }
+    test -s ${INKLING2_MODEL_DIR:-models/exl3}/iqr-layer-00.safetensors ||
+        { echo "INKLING2_EXPERTS=iqr4 needs INKLING2_MODEL_DIR with iqr-layer-*.safetensors (docs/IQR.md)" >&2; exit 1; }
 fi
 mkdir -p "$work"
 exec 8>"$work/serve.lock"
@@ -76,12 +82,12 @@ cat > "$work/plugin/inkling2_b70-0.1.dist-info/entry_points.txt" <<'EOF'
 [vllm.general_plugins]
 inkling2_b70 = inkling_xpu.vllm_plugin:register
 EOF
-python3 - "$work/config/config.json" "${INKLING2_VISION:-0}" <<'PY'
+python3 - "$work/config/config.json" "${INKLING2_VISION:-0}" "${INKLING2_MODEL_DIR:-models/exl3}" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-checkpoint = json.loads(Path('models/exl3/config.json').read_text())
+checkpoint = json.loads(Path(sys.argv[3], "config.json").read_text())
 text = checkpoint['text_config']
 config = {key: text[key] for key in ('hidden_size', 'num_attention_heads', 'num_key_value_heads',
                                      'head_dim', 'intermediate_size', 'rms_norm_eps')}
@@ -209,6 +215,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_MAX_SEQS=$slots" --env INKLING2_TRACE_BATCH --env "INKLING2_VISION=${INKLING2_VISION:-0}" \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
     --env "INKLING2_EXL3_SHARED_INPUT=${INKLING2_EXL3_SHARED_INPUT:-1}" \
+    --env "INKLING2_EXPERTS=${INKLING2_EXPERTS:-exl3}" --env INKLING2_IQR_MOE_LIB --env INKLING2_IQR_CHECK_IDS \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
     --env "INKLING2_PREFILL_PREP=${INKLING2_PREFILL_PREP:-0}" \
     --env "INKLING2_PREFILL_DENSE_BF16=${INKLING2_PREFILL_DENSE_BF16:-0}" \
@@ -258,8 +265,8 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_W8A8_LIBRARY=${INKLING2_W8A8_LIBRARY:-}" \
     --env HF_HUB_OFFLINE=1 --env OMP_NUM_THREADS=4 --env SYCL_CACHE_PERSISTENT=0 \
     --env ONEAPI_DEVICE_SELECTOR=level_zero:gpu --env "SYCL_UR_USE_LEVEL_ZERO_V2=${INKLING2_UR_LEVEL_ZERO_V2:-${INKLING2_DECODE_GRAPH:-0}}" \
-    --entrypoint /opt/venv/bin/vllm "$runtime" serve /lab/models/exl3 \
-    --hf-config-path /lab/.work/vllm-inkling/config --tokenizer /lab/models/exl3 \
+    --entrypoint /opt/venv/bin/vllm "$runtime" serve /lab/${INKLING2_MODEL_DIR:-models/exl3} \
+    --hf-config-path /lab/.work/vllm-inkling/config --tokenizer /lab/${INKLING2_MODEL_DIR:-models/exl3} \
     --served-model-name inkling2-mini-exl3-b70 --generation-config vllm --load-format safetensors \
     --host 127.0.0.1 --port "$port" --max-model-len "$context" --max-num-seqs "$slots" \
     --max-num-batched-tokens "$batch" --gpu-memory-utilization 0.90 \
