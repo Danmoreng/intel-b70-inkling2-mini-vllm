@@ -91,11 +91,16 @@ The API listens on loopback port 8093. For text with tools, use
 OpenAI tool definitions. Set the `reasoning_effort` field explicitly when
 comparing coding workflows. For the measured coding-agent profile, send
 `"reasoning_effort": "medium"`, `"thinking_token_budget": 8192` and
-`"max_tokens": 16384` in each chat request. The single-sequence Intel sampler
+`"max_tokens": 16384` in each chat request. The Intel sampler
 shares the requested thinking budget across all thinking messages in that
 response, including tokens accepted from DSpark. The next API request gets
-its own budget. Prefix reuse tracks the most recent sequence
-and is scoped to vLLM's block hashes and caller-provided cache salt.
+its own budget. Each of up to four active requests owns its local attention, convolution and draft state.
+A finished slot can supply a prefix when the block hashes and caller-provided
+cache salt match. The four slots share model weights and the global KV page pool.
+The reference host reports 263,168 physical KV tokens for all active clients
+combined, with a 262,144-token context limit per request. vLLM queues excess
+work. Set `INKLING2_MAX_SEQS=1` before starting the launcher to select the
+single-slot configuration.
 
 ## llama.cpp and DSpark
 

@@ -102,7 +102,7 @@ def main():
     parser.add_argument("--container", default="inkling2-vllm-exl3")
     subset = parser.add_mutually_exclusive_group()
     subset.add_argument("--batching-4k", action="store_true",
-                        help="Qualify the four-slot recipe at 4K, from one through four simultaneous clients.")
+                        help="Report pure decode at 4K with one through four simultaneously generating clients.")
     subset.add_argument(
         "--isolated-prefix",
         action="store_true",

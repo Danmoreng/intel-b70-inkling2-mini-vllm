@@ -28,6 +28,7 @@ def extract(ordinary, dspark, qwen):
             receipt = json.loads((folder / "runtime.json").read_text())
             receipts[label] = dict(start=run["start"], end=json.loads((folder / "completed.json").read_text())["end"],
                                    power_w=run["power_w"], image=receipt["image_id"], files=receipt["file_sha256"],
+                                   checkout_head_at_start=receipt["recipe_revision"],
                                    max_num_seqs=run["container"]["max_num_seqs"],
                                    num_speculative_tokens=run["container"]["num_speculative_tokens"])
         for ref in references:

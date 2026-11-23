@@ -9,9 +9,13 @@ Run **Inkling 2 Mini on one 32 GB Intel Arc Pro B70** with a **262,144-token con
 | Hardware | One Arc Pro B70, 32 GB. Standard card limit 180 W. |
 | Model | 4-bit EXL3 experts, BF16 dense weights. [Pinned checkpoint](https://huggingface.co/grant-ai/Inkling-2-Mini-EXL3-4bpw/tree/c266f76b68429255e1d6ec151d0aa15f48f6abcc) |
 | Runtime | vLLM 0.33.0 and PyTorch 2.15.0+xpu |
-| Context and cache | 262,144 input and output tokens combined, FP8 KV, automatic prefix reuse |
-| Serving | One active sequence, 6,144-token prefill chunks, up to seven DSpark proposals per round |
+| Context and cache | 262,144 input and output tokens per request, shared FP8 KV pool, automatic prefix reuse |
+| Serving | Up to four active sequences, 6,144-token prefill chunks, up to seven DSpark proposals per request and round |
 | API | Chat, images, streamed tool calls and completions at `http://127.0.0.1:8093/v1`. Model ID `inkling2-mini-exl3-b70`. |
+
+## Concurrent serving at 180 W
+
+With all four clients decoding 4K code-review prompts, the B70 generated **122.3 tok/s with ordinary decode** and **106.3 tok/s with adaptive DSpark B7** in aggregate. With one active client, DSpark achieved **82.8 decode tok/s**. [Pure decode by concurrency, Qwen comparison and validation](benchmarks/2026-11-23/batching/README.md)
 
 ## Long-context performance at 180 W
 
@@ -19,7 +23,7 @@ One client reviewed frozen source files and generated 1,024 tokens per request. 
 
 ![Inkling single-client context sweep at 180 W. Cold prefill, active decode, first-token latency and repeated prefix hits across nine prompt sizes.](benchmarks/2026-11-23/serving/inkling-single-client-sweep.png)
 
-The full serving benchmark covers 20 scenarios and 124 requests, including concurrent clients. A separate capacity check filled the full window with 262,016 input and 128 output tokens. [Full serving results and Qwen comparison](benchmarks/2026-11-23/serving/README.md) · [Maximum-context check](benchmarks/2026-11-23/prefill-180w/README.md) · [Prefix-cache fix](benchmarks/2026-11-23/prefix-cache/README.md)
+The earlier single-slot serving benchmark covers 20 scenarios and 124 requests, including concurrent clients. A separate capacity check filled the full window with 262,016 input and 128 output tokens. [Full serving results and Qwen comparison](benchmarks/2026-11-23/serving/README.md) · [Maximum-context check](benchmarks/2026-11-23/prefill-180w/README.md) · [Prefix-cache fix](benchmarks/2026-11-23/prefix-cache/README.md)
 
 ## Peak throughput at 230 W
 
@@ -37,6 +41,7 @@ bash scripts/check-sycl.sh exl3
 INKLING2_EXL3_TILE_ROWS=32 bash scripts/check-sycl.sh exl3 --tokens 256 512
 INKLING2_EXL3_TILE_ROWS=32-64 bash scripts/check-sycl.sh exl3 --small-dpas --tokens 4 7 8 47 2047 2048 2129 6144
 bash scripts/check-sycl.sh paged-fused
+bash scripts/check-sycl.sh paged-batch
 bash scripts/build-loop-control.sh
 
 INKLING2_PREFILL_PROFILE=optimized INKLING2_VISION=1 INKLING2_VISION_FUSED_QKV=1 \

@@ -31,15 +31,15 @@ The three matrix requests contain the same 74,690 Inkling input tokens. The seco
 
 The single-slot history guard provides a possible explanation for the third request's cache miss. It resets the saved snapshot when ownership changes and records a new one for a scheduled chunk larger than eight tokens. After the first 64K cache hit only two prompt tokens remained, versus eleven in the 16K case. The benchmark recorded cache counters and stream events. Establishing the cause of the late content event would require tracing the output path. [Ring history guard](../../../inkling_xpu/ring_prefix.py)
 
-## Why concurrent clients queue
+## Serving configuration in this sweep
 
-The Inkling adapter allocates one external sequence slot for local attention history, checks for one sequence in the attention metadata and uses the first request's page table during prefill. DSpark takes one request's sampling seed, last sampled token, sequence length and rejection count. Its seven proposal positions belong to that sequence. Both components explicitly require `max_num_seqs=1`. Qwen's serving adapter supports multiple active sequences on the same card. [Target adapter](../../../inkling_xpu/vllm_model.py) · [DSpark adapter](../../../inkling_xpu/dspark.py)
+The Inkling adapter at the time of this 70-wave run allocated a single external ring slot. DSpark also read one request's sampling state. Every concurrent wave in this archive therefore measures queued clients on that release. The subsequent four-slot release has its own [4K concurrency qualification](../batching/README.md).
 
 ## Reproduce the qualification
 
 Use the [Qwen release harness at 0356a37](https://github.com/Danmoreng/intel-b70-qwen38-vllm/tree/0356a370da5f73f6b0a4eab613d7103a2356b513) and its local R12 raw serving archive, including the `warmups/` directory. The raw prompts are archived outside Git. The adapter verifies the inventory of 248 measured input files and 70 warmup input files and pins the streaming client, metric sampler and scenario definitions by SHA-256. It retains the original text, sampling, cache identifiers where present and seeds. It translates the model selection and thinking controls for Inkling.
 
-Start a fresh idle Inkling worker with the benchmarked recipe and exclusive access to the B70. The runner verifies the 180 W power cap, endpoint identity, draft ceiling, single sequence, context limit and empty completion counters. On the reference host, use the Observatory service controls to restart the selected Inkling engine. Set an outer timeout that leaves time for cleanup before the host's daily shutdown.
+Set `INKLING2_MAX_SEQS=1` and start a fresh idle Inkling worker with the benchmarked recipe and exclusive access to the B70. The runner verifies the 180 W power cap, endpoint identity, draft ceiling, single sequence, context limit and empty completion counters. On the reference host, use the Observatory service controls to restart the selected Inkling engine. Set an outer timeout that leaves time for cleanup before the host's daily shutdown.
 
 ```bash
 QWEN=/path/to/intel-b70-qwen38-vllm
