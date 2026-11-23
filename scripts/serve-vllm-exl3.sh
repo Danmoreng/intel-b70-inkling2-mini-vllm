@@ -38,10 +38,12 @@ fi
 check_vendor_patch() {
     local source_file=$1
     local patch_file="$PWD/patches/$2"
-    local previous_sha=${3:-}
+    shift 2
+    local installed_sha
+    installed_sha=$(sha256sum < "$vendor/$source_file" | cut -d' ' -f1)
     if git -C "$vendor" diff --quiet -- "$source_file"; then
         git -C "$vendor" apply "$patch_file"
-    elif [[ -n $previous_sha && $(sha256sum < "$vendor/$source_file" | cut -d' ' -f1) == "$previous_sha" ]]; then
+    elif [[ " $* " == *" $installed_sha "* ]]; then
         # Replace only the exact previous released adapter. Preserve local edits.
         local staged
         staged=$(mktemp "$vendor/$source_file.update.XXXXXX")
@@ -57,7 +59,7 @@ check_vendor_patch() {
     git -C "$vendor" diff -- "$source_file" | cmp - "$patch_file"
 }
 check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
-    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896
+    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
 check_vendor_patch xpu/exl3xpu/inkling2/vendor/inkling2_vision.py trellis-inkling-vision-qkv.patch
 
@@ -184,6 +186,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env PYTHONPATH=/lab:/lab/.work/python:/lab/.work/vllm-inkling/plugin \
     --env "INKLING2_VISION=${INKLING2_VISION:-0}" \
     --env PYTHONDONTWRITEBYTECODE=1 --env VLLM_PLUGINS=inkling2_b70 --env VLLM_NO_USAGE_STATS=1 \
+    --env "INKLING2_EXL3_SHARED_INPUT=${INKLING2_EXL3_SHARED_INPUT:-1}" \
     --env "EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}" \
     --env "INKLING2_PREFILL_PREP=${INKLING2_PREFILL_PREP:-0}" \
     --env "INKLING2_PREFILL_DENSE_BF16=${INKLING2_PREFILL_DENSE_BF16:-0}" \

@@ -145,9 +145,35 @@ def check_experts(nvfp4):
     print(f"{'NVFP4' if nvfp4 else 'MXFP8'} MoE H={hidden} I={intermediate} top8: relative_l2={error:.3g}", flush=True)
 
 
+def check_fused_bias():
+    from inkling_xpu.prefill_kernels import local_bias, pack_local_projection
+
+    for rows, start, residual in ((17, 0, False), (251, 79, True), (257, 30720, False)):
+        history = min(start, 1023)
+        q = torch.randn(rows, 24, 128, device="xpu").half()
+        k = torch.randn(rows + history, 8, 128, device="xpu").half()
+        v = torch.randn_like(k)
+        relative = torch.randn(rows, 24, 16, device="xpu")
+        projection = torch.randn(16, 1024, device="xpu") * 0.1
+        if not residual:
+            projection = projection.half().float()
+        packed = pack_local_projection(projection)
+        assert packed.size(0) == 1 + int(residual)
+        sink = torch.randn(rows, 24, device="xpu")
+        expected = attention_prefill_esimd(q, k, v, start, start - history, local_bias(relative, projection),
+                                          sink, window=1024, qtw=4)
+        actual = torch.empty_like(expected)
+        torch.ops.inkling2_xpu.prefill_fused_bias(q, k, v, actual, relative, packed, sink,
+                                                  start, start - history, 1024, 4)
+        rel_l2 = ((actual - expected).norm() / expected.norm()).item()
+        assert rel_l2 < 3e-4, (rows, start, rel_l2)
+        print(f"Fused local bias, {rows} rows at {start}, residual={residual}, relative_l2={rel_l2:.5g}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library")
+    parser.add_argument("--fused-bias", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(2)
     torch.manual_seed(2026)
@@ -163,6 +189,8 @@ def main():
     for window in (0, 128):
         check_prefill(window)
     check_hybrid_prefill()
+    if args.fused_bias:
+        check_fused_bias()
     torch.xpu.synchronize()
     print("PASS: 16 block-table cases, 1 legacy table case, 3 prefill cases and both MoE formats", flush=True)
 

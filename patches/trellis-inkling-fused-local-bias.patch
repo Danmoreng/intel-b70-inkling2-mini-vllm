@@ -1,0 +1,134 @@
+--- a/inkling2_ops.sycl
++++ b/inkling2_ops.sycl
+@@ -542,7 +542,7 @@
+ constexpr int QR = 8, KT = 16, KBT = 2, KB = KT * KBT;
+ constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+ 
+-template <int D, bool split_block = false>
++template <int D, bool split_block = false, bool fused_bias = false>
+ struct Kern {
+     const fp16* q; const fp16* k; const fp16* v; float* o; float* lse;
+     const uint16_t* table; const float* sink;
+@@ -550,6 +550,9 @@
+     float scale_log2;
+     const int32_t* block_start = nullptr;
+     int splits = 1, ring_capacity = 0, history_window = 0, prefix_tokens = 0;
++    const float *rel = nullptr;
++    const fp16 *packed_proj = nullptr;
++    bool projection_residual = false;
+ 
+     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+         constexpr int NC = D / 16;
+@@ -595,6 +598,17 @@
+             m[r] = (sink && live) ? sink[(size_t)(q0 + r) * Hq + h] * LOG2E : NEG;
+             l[r] = (sink && live) ? 1.0f : 0.0f;
+         }
++        simd<fp16, QR * 16> rel_hi(0), rel_lo(0);
++        if constexpr (fused_bias) {
++#pragma unroll
++            for (int r = 0; r < QR; ++r)
++                if (q0 + r < Lq) {
++                    auto rr = block_load<float, 16>(rel + ((size_t)(q0 + r) * Hq + h) * 16);
++                    auto high = convert<fp16>(rr);
++                    rel_hi.template select<16, 1>(r * 16) = high;
++                    rel_lo.template select<16, 1>(r * 16) = convert<fp16>(rr - convert<float>(high));
++                }
++        }
+         const int qmin = absolute_q + q0, qmax = absolute_q + (q0 + QR < Lq ? q0 + QR : Lq) - 1;
+         int hi = qmax - absolute_k + 1; if (hi > length) hi = length;
+         int lo = 0;
+@@ -622,6 +636,47 @@
+                         simd<fp16, QR * 16>(Qc.template select<QR * 16, 1>(c * QR * 16)));
+                 }
+                 S.template select<QR * KT, 1>(t * QR * KT) = acc * scale_log2;
++            }
++            if constexpr (fused_bias) {
++                // The eight queries share a reversed stripe of relative distances.
++                // Row r consumes lanes [7-r, 7-r+32), matching its causal offset.
++                constexpr int pitch = 1152, groups = KBT + 1;
++                simd<float, QR * groups * KT> stripe;
++                const int first = 64 + 1023 - (qmin - absolute_k - kb0 + QR - 1);
++#pragma unroll
++                for (int g = 0; g < groups; ++g) {
++                    const int xcol = first + g * KT;
++                    auto p_hi = xesimd::lsc_load_2d<uint32_t, 16, 8, 1, false, false, xesimd::cache_hint::cached,
++                                                    xesimd::cache_hint::cached>(
++                        reinterpret_cast<const uint32_t *>(packed_proj), pitch * 4 - 1, 7, pitch * 4 - 1, xcol, 0);
++                    simd<fp16, 256> hi_b = p_hi.template bit_cast_view<fp16>().read();
++                    simd<float, QR * KT> z = 0.f;
++                    auto prod = xmx::dpas<8, 8, float, float, fp16, fp16>(z, hi_b, rel_hi);
++                    auto residual = xmx::dpas<8, 8, float, float, fp16, fp16>(z, hi_b, rel_lo);
++
++                    if (projection_residual) {
++                        auto p_lo = xesimd::lsc_load_2d<uint32_t, 16, 8, 1, false, false, xesimd::cache_hint::cached,
++                                                        xesimd::cache_hint::cached>(
++                            reinterpret_cast<const uint32_t *>(packed_proj) + 8 * pitch, pitch * 4 - 1, 7,
++                            pitch * 4 - 1, xcol, 0);
++                        residual += xmx::dpas<8, 8, float, float, fp16, fp16>(
++                            z, p_lo.template bit_cast_view<fp16>().read(), rel_hi);
++                    }
++                    prod += residual;
++                    // Round to nearest-even BF16 as in the materialized bias table.
++                    auto bits = prod.template bit_cast_view<uint32_t>().read();
++                    bits = (bits + 0x7fffu + ((bits >> 16) & 1u)) & 0xffff0000u;
++                    prod = bits.template bit_cast_view<float>().read();
++#pragma unroll
++                    for (int r = 0; r < QR; ++r)
++                        stripe.template select<KT, 1>((r * groups + g) * KT) = prod.template select<KT, 1>(r * KT);
++                }
++#pragma unroll
++                for (int t = 0; t < KBT; ++t)
++#pragma unroll
++                    for (int r = 0; r < QR; ++r)
++                        S.template select<KT, 1>((t * QR + r) * KT) +=
++                            simd<float, KT>(stripe.template select<KT, 1>((r * groups + t) * KT + QR - 1 - r)) * LOG2E;
+             }
+             const int kpmin = absolute_k + kb0, kpmax = absolute_k + kb0 + KB - 1;
+             const bool need_mask = (kb0 + KB > length) || (kpmax > qmin) || (window > 0 && qmax - kpmin >= window);
+@@ -915,6 +970,37 @@
+     const size_t n = (size_t)qgroups * qtw * Hq;
+     const int wg = (Hq / Hk) * qtw;
+     qu.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>(n, wg), kern); });
++}
++
++void prefill_fused_bias(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor o,
++                       at::Tensor relative, at::Tensor projection, at::Tensor sink,
++                       int64_t qpos0, int64_t kpos0, int64_t window, int64_t qtw) {
++    TORCH_CHECK(q.is_xpu() && q.dim() == 3 && q.size(0) > 0 && q.size(1) == 24 && q.size(2) == 128);
++    const int rows = q.size(0);
++    TORCH_CHECK(kpos0 >= 0 && qpos0 >= kpos0 && qpos0 - kpos0 < window &&
++                qpos0 <= INT32_MAX - rows - 64 && window == 1024 && qtw > 0 && qtw <= 8);
++    TORCH_CHECK(k.sizes() == at::IntArrayRef({rows + qpos0 - kpos0, 8, 128}) &&
++                v.sizes() == k.sizes() && o.sizes() == q.sizes() &&
++                relative.sizes() == at::IntArrayRef({rows, 24, 16}) && sink.sizes() == at::IntArrayRef({rows, 24}));
++    TORCH_CHECK(projection.dim() == 4 && (projection.size(0) == 1 || projection.size(0) == 2) &&
++                projection.sizes() == at::IntArrayRef({projection.size(0), 8, 1152, 2}));
++    for (const auto& operand : {q, k, v, projection})
++        TORCH_CHECK(operand.device() == q.device() && operand.scalar_type() == at::kHalf && operand.is_contiguous());
++    for (const auto& operand : {o, relative, sink})
++        TORCH_CHECK(operand.device() == q.device() && operand.scalar_type() == at::kFloat && operand.is_contiguous());
++    fa::Kern<128, false, true> kern{
++        reinterpret_cast<const sycl::half*>(q.data_ptr()), reinterpret_cast<const sycl::half*>(k.data_ptr()),
++        reinterpret_cast<const sycl::half*>(v.data_ptr()), o.data_ptr<float>(), nullptr, nullptr, sink.data_ptr<float>(),
++        rows, static_cast<int>(k.size(0)), 24, 8, 3, static_cast<int>(qpos0), static_cast<int>(kpos0),
++        static_cast<int>(window), 0, static_cast<int>(qtw), static_cast<float>(fa::LOG2E / sycl::sqrt(128.0))};
++    kern.rel = relative.data_ptr<float>();
++    kern.packed_proj = reinterpret_cast<const sycl::half*>(projection.data_ptr());
++    kern.projection_residual = projection.size(0) == 2;
++    const size_t tiles = (rows + fa::QR - 1) / fa::QR;
++    const size_t groups = (tiles + qtw - 1) / qtw;
++    queue_of(q).submit([&](sycl::handler& h) {
++        h.parallel_for(sycl::nd_range<1>(groups * qtw * 24, 3 * qtw), kern);
++    });
+ }
+ 
+ // Noncausal DSpark block: the K/V cache contains the context and eight
+@@ -1212,6 +1298,8 @@
+     m.impl("moe_gemv2", torch::kXPU, &inkling2::moe_gemv2);
+     m.def("prefill_attn(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor? table, Tensor? sink, int qpos0, int kpos0, int window, int qtw=1, Tensor(b!)? lse=None) -> ()");
+     m.impl("prefill_attn", torch::kXPU, &inkling2::prefill_attn);
++    m.def("prefill_fused_bias(Tensor q, Tensor k, Tensor v, Tensor(a!) o, Tensor rel, Tensor proj, Tensor sink, int qpos0, int kpos0, int window, int qtw) -> ()");
++    m.impl("prefill_fused_bias", torch::kXPU, &inkling2::prefill_fused_bias);
+     m.def("dequant(Tensor W, Tensor S, Tensor? alpha, Tensor ids, Tensor(a!) out) -> ()");
+     m.impl("dequant", torch::kXPU, &inkling2::dequant);
+ }

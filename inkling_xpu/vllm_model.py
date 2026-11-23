@@ -44,7 +44,9 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.prefill_bank = os.environ.get("INKLING2_PREFILL_BANK", "0") == "1"
         self.prefill_dense_bf16 = os.environ.get("INKLING2_PREFILL_DENSE_BF16", "0") == "1"
         self.prefill_prep = os.environ.get("INKLING2_PREFILL_PREP", "0") == "1"
-        self.prefill_local_bias = os.environ.get("INKLING2_PREFILL_LOCAL_BIAS", "0") == "table"
+        local_bias = os.environ.get("INKLING2_PREFILL_LOCAL_BIAS", "0")
+        self.prefill_local_bias = local_bias in ("table", "fused")
+        self.fuse_local_projection = local_bias == "fused"
         self.prefill_kv_conv = os.environ.get("INKLING2_PREFILL_KV_CONV", "0") == "1"
         self.prefill_output_conv = os.environ.get("INKLING2_PREFILL_OUTPUT_CONV", "0") == "1"
         self.enable_ring_prefix = cache.enable_prefix_caching
@@ -104,6 +106,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         experts = {layer: InklingEXL3Experts(self.checkpoint, layer, device, self.tc["n_routed_experts"])
                    for layer in range(self.n_layers)}
         super().load_weights(weights, experts=experts)
+        if self.fuse_local_projection:
+            from .prefill_kernels import pack_local_projection
+            self.prefill_local_projections = {
+                layer: pack_local_projection(self.f32[f"layers.{layer}.attn.rel_logits_proj.proj"])
+                for layer in self.local
+            }
         self.prefill_depth = None
         if os.environ.get("INKLING2_PREFILL_DEPTH", "0") == "1":
             from .prefill_depth import DepthQueries

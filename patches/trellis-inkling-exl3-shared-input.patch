@@ -1,0 +1,135 @@
+--- a/exl3_moe_single.sycl
++++ b/exl3_moe_single.sycl
+@@ -452,7 +452,7 @@
+ }
+ 
+ // gate|up: WG per row block b; T = 2 * (I/16) / NT threads (I=640: 20), thread = (proj, 4-tile group).
+-template <int K, int MB, typename TIn>
++template <int K, int MB, typename TIn, bool shared = false>
+ struct GateUpDpasKernel {
+     const TIn* x; int x_stride;
+     const int64_t* ptrs;
+@@ -504,13 +504,17 @@
+                 simd<fp16, 128> vh = 0;
+                 if (m < rows) {
+                     int tok = rt.tok(s0 + r0 + m);
+-                    simd<float, 128> v = convert<float>(block_load<TIn, 128>(x + (size_t)tok * x_stride + kb * 128)) *
+-                                         convert<float>(block_load<fp16, 128>(suh + (size_t)pj * H + kb * 128));
+-                    v = convert<float>(convert<fp16>(v));
++                    if constexpr (shared) {
++                        vh = block_load<fp16, 128>(x + (size_t)tok * x_stride + pj * H + kb * 128);
++                    } else {
++                        simd<float, 128> v = convert<float>(block_load<TIn, 128>(x + (size_t)tok * x_stride + kb * 128)) *
++                                             convert<float>(block_load<fp16, 128>(suh + (size_t)pj * H + kb * 128));
++                        v = convert<float>(convert<fp16>(v));
+ #ifndef EXL3_MOE_PROBE_DPAS_NOHAD
+-                    fwht128(v);
+-#endif
+-                    vh = convert<fp16>(v * kRsqrt128);
++                        fwht128(v);
++#endif
++                        vh = convert<fp16>(v * kRsqrt128);
++                    }
+                 }
+ #pragma unroll
+                 for (int i = 0; i < 8; ++i) slm_block_store<fp16, 16>(a_off(buf, pj, i, m), vh.template select<16, 1>(i * 16));
+@@ -914,9 +918,9 @@
+     tiny_gu = gu;
+     tiny_dn = dn;
+ }
+-template <int K, bool tiny = false, int MB = tiny ? 8 : prefill_mb<K>()>
++template <int K, bool tiny = false, int MB = tiny ? 8 : prefill_mb<K>(), bool shared = false>
+ static at::Tensor moe_prefill(const at::Tensor &x, const at::Tensor &topk_ids, const at::Tensor &topk_w,
+-                              const at::Tensor &ptrs, const Geom &gm, int E, at::Tensor &out) {
++                              const at::Tensor &ptrs, const Geom &gm, int E, at::Tensor &out, const at::Tensor &inputs = {}) {
+     auto& q = queue_of(x);
+     int M = x.size(0), H = gm.H, I = gm.I, topk = topk_ids.size(1), npairs = M * topk;
+     using YT = std::conditional_t<tiny, float, fp16>;
+@@ -937,12 +941,17 @@
+     int T1 = 2 * (I / gate_parts / 16) / GateUpDpasKernel<K, MB, bf16>::NT;
+     auto run_gu = [&](auto tag) {
+         using TIn = decltype(tag);
+-        GateUpDpasKernel<K, MB, TIn> k{reinterpret_cast<const TIn*>(x.data_ptr()), (int)x.stride(0), pp, rb.rt, rb.blk_a,
++        const auto& source = shared ? inputs : x;
++        GateUpDpasKernel<K, MB, TIn, shared> k{reinterpret_cast<const TIn*>(source.data_ptr()), (int)source.stride(0), pp, rb.rt, rb.blk_a,
+                                        rb.n_blk, reinterpret_cast<fp16*>(ablk.data_ptr()), H, I, gm.off_suh_g(),
+                                        gm.off_svh_g(), gm.off_suh_d(), gate_parts};
+         q.submit([&](sycl::handler& h) { h.parallel_for(sycl::nd_range<1>((size_t)rb.max_blk * gate_parts * T1, T1), props, k); });
+     };
+-    if (!(g_debug_skip & 1)) { if (x.scalar_type() == at::kHalf) run_gu(fp16{}); else run_gu(bf16{}); }
++    if (!(g_debug_skip & 1)) {
++        if constexpr (shared) run_gu(fp16{});
++        else if (x.scalar_type() == at::kHalf) run_gu(fp16{});
++        else run_gu(bf16{});
++    }
+     int T2 = (H / partitions / 16) / DownDpasKernel<K, MB, YT>::NT;
+     DownDpasKernel<K, MB, YT> kd{reinterpret_cast<const fp16*>(ablk.data_ptr()), pp, rb.rt, rb.blk_a, rb.n_blk,
+                                    reinterpret_cast<YT*>(y.data_ptr()), H, I, gm.gu_bytes(), gm.off_svh_d(), partitions};
+@@ -1307,6 +1316,58 @@
+ at::Tensor moe_forward(at::Tensor x, at::Tensor topk_ids, at::Tensor topk_w, at::Tensor ptrs, int64_t I, int64_t K,
+                        int64_t n_experts) {
+     return moe_forward_impl(x, topk_ids, topk_w, nullptr, ptrs, I, K, n_experts, nullptr, nullptr, nullptr, nullptr);
++}
++
++// Inkling layers may share the two input-scale vectors across every expert.
++template <typename TIn> struct SharedInputHadamard {
++    const TIn *x;
++    const fp16 *scales;
++    fp16 *result;
++    int hidden;
++    void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
++        const int blocks = hidden / 128;
++        const int index = it.get_global_id(0);
++        const int token = index / blocks;
++        const int col = (index % blocks) * 128;
++        auto values = convert<float>(block_load<TIn, 128>(x + (size_t)token * hidden + col));
++#pragma unroll
++        for (int proj = 0; proj < 2; ++proj) {
++            auto scale = convert<float>(block_load<fp16, 128>(scales + proj * hidden + col));
++            auto v = convert<float>(convert<fp16>(values * scale));
++            fwht128(v);
++            block_store<fp16, 128>(result + ((size_t)token * 2 + proj) * hidden + col, convert<fp16>(v * kRsqrt128));
++        }
++    }
++};
++
++at::Tensor moe_shared_prefill(at::Tensor x, at::Tensor ids, at::Tensor weights, at::Tensor ptrs, at::Tensor scales) {
++    const int64_t rows = x.size(0), experts = ptrs.numel();
++    TORCH_CHECK(x.is_xpu() && x.is_contiguous() && x.dim() == 2 && x.size(1) == 2304 && rows >= 2048 &&
++                rows <= 1048576 && (x.scalar_type() == at::kHalf || x.scalar_type() == at::kBFloat16));
++    TORCH_CHECK(experts >= 1 && experts <= 1024 && ptrs.dim() == 1 && ptrs.scalar_type() == at::kLong &&
++                ids.sizes() == at::IntArrayRef({rows, 8}) && ids.scalar_type() == at::kInt &&
++                weights.sizes() == ids.sizes() && weights.scalar_type() == at::kFloat &&
++                scales.sizes() == at::IntArrayRef({2, 2304}) && scales.scalar_type() == at::kHalf);
++    for (const auto &t : {ptrs, ids, weights, scales}) {
++        TORCH_CHECK(t.device() == x.device() && t.is_contiguous());
++    }
++    auto inputs = at::empty({rows, 4608}, x.options().dtype(at::kHalf));
++    auto &q = queue_of(x);
++    auto prepare = [&](auto tag) {
++        using TIn = decltype(tag);
++        SharedInputHadamard<TIn> op{reinterpret_cast<const TIn *>(x.data_ptr()),
++                                    reinterpret_cast<const fp16 *>(scales.data_ptr()),
++                                    reinterpret_cast<fp16 *>(inputs.data_ptr()), 2304};
++        size_t items = rows * 18;
++        // Each token contributes exactly eighteen independent 128-value blocks.
++        q.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(items, 2), op); });
++    };
++    if (x.scalar_type() == at::kHalf)
++        prepare(fp16{});
++    else
++        prepare(bf16{});
++    auto out = at::empty_like(x);
++    return moe_prefill<4, false, 64, true>(x, ids, weights, ptrs, Geom{2304, 1152, 4}, experts, out, inputs);
+ }
+ 
+ // Same, with the device expert cache for layer `layer` (see launch_ensure). Prefill sizes (M >= prefill_min_m) skip the
+@@ -1665,6 +1726,8 @@
+ }  // namespace moe
+ 
+ TORCH_LIBRARY(exl3xpu_moe, m) {
++    m.def("moe_shared_prefill(Tensor x, Tensor ids, Tensor weights, Tensor ptrs, Tensor scales) -> Tensor");
++    m.impl("moe_shared_prefill", torch::kXPU, &moe::moe_shared_prefill);
+     m.def("moe_forward(Tensor x, Tensor topk_ids, Tensor topk_w, Tensor ptrs, int I, int K, int n_experts) -> Tensor");
+     m.impl("moe_forward", torch::kXPU, &moe::moe_forward);
+     m.def("moe_forward_cached(Tensor x, Tensor topk_ids, Tensor topk_w, Tensor(a!) ptrs_all, int layer, Tensor(b!) slot_of, "

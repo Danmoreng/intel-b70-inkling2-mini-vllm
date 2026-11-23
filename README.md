@@ -12,7 +12,9 @@ The coding launcher defaults to adaptive DSpark with up to seven proposals per r
 
 With `INKLING2_PREFILL_PROFILE=optimized`, the DSpark launcher also tunes attention splits by context and verification width. At starting contexts of 64K and 128K this reduced the target replay time by **4.1% and 3.3%** on a Pi repair, weighting both profiles by the same observed widths. Set `INKLING2_DSPARK_VERIFY_TUNING=0` to select the previous split counts. [Agent throughput, quality checks, maximum context and ordinary-decode comparison](benchmarks/2026-11-23/attention/README.md)
 
-With the adaptive EXL3 expert tile built, the optimized profile processes 32K / 64K / 128K cold Pi inputs at **2,663 / 2,513 / 2,257 tok/s at 180 W** and **3,015 / 2,852 / 2,560 tok/s at 230 W**. Vision, FP8 KV and adaptive DSpark were enabled at both limits. [Matched power and kernel measurements](benchmarks/2026-11-23/prefill-power/README.md)
+At **180 W**, the optimized profile now reaches **3,083 tok/s at 32K** and **2,894 tok/s at 64K** on cold Pi prompts. At 32K, median time to first output is **10.75 s**, down from 12.30 s. The full 262,144-token window and a 64K Pi repair were verified with vision, FP8 KV and adaptive DSpark enabled. [Expert kernels, fused local bias, per-run measurements and reproduction](benchmarks/2026-11-23/prefill-180w/README.md)
+
+The previous adaptive EXL3 expert tile processed 32K / 64K / 128K cold Pi inputs at **2,663 / 2,513 / 2,257 tok/s at 180 W** and **3,015 / 2,852 / 2,560 tok/s at 230 W**. Vision, FP8 KV and adaptive DSpark were enabled at both limits. [Matched power and kernel measurements](benchmarks/2026-11-23/prefill-power/README.md)
 
 For a Pi Coding Agent session that starts close to the 262,144-token limit, set `compaction.keepRecentTokens` to `4096` in the session profile and leave `reserveTokens` at `16384`. On one blind Django repair with 240,518 initial Inkling tokens, both seeds compacted and passed the official tests. With the default 20,000-token retention, both seeds exhausted the window. Medium reasoning and the 8,192-token thinking budget were active in all four runs. [Measured Pi settings and outcomes](benchmarks/2026-11-22/quality/long-pi.md)
 
@@ -120,7 +122,8 @@ From the repository root, after preparing the images and checkpoint:
 bash scripts/check-sycl.sh
 bash scripts/check-sycl.sh exl3
 INKLING2_EXL3_TILE_ROWS=32 bash scripts/check-sycl.sh exl3 --tokens 256 512
-INKLING2_EXL3_TILE_ROWS=32-48 bash scripts/check-sycl.sh exl3 --small-dpas --tokens 4 7 8 47 2047 2048
+INKLING2_EXL3_TILE_ROWS=32-64 bash scripts/check-sycl.sh exl3 --small-dpas --tokens 4 7 8 47 2047 2048 2129 6144
+bash scripts/check-sycl.sh paged-fused
 
 bash scripts/build-loop-control.sh
 bash scripts/serve-coding-agent.sh dspark

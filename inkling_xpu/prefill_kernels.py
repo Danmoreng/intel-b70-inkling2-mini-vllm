@@ -140,6 +140,29 @@ def local_bias(r, projection):
     return table
 
 
+def pack_local_projection(projection):
+    # Relative distances decrease across an attention tile. Pad both ends
+    # for masked lanes and arrange depth pairs as the XMX right operand.
+    reversed_weights = torch.nn.functional.pad(projection.flip((1,)), (64, 64))
+    pairs = reversed_weights.reshape(8, 2, 1152).transpose(1, 2).contiguous()
+    high = pairs.half()
+    residual = (pairs - high.float()).half()
+    if torch.count_nonzero(residual).item() == 0:
+        return high.unsqueeze(0)
+    return torch.stack((high, residual))
+
+
+def fused_local_attention(q, k, v, relative, projection, sink, qpos, kpos, window, qtw):
+    from inkling_trellis.inkling2.moe_triton import ops
+
+    out = torch.empty(q.shape, dtype=torch.float32, device=q.device)
+    ops().prefill_fused_bias(
+        q.half().contiguous(), k.half().contiguous(), v.half().contiguous(), out,
+        relative.float().contiguous(), projection, sink.float().contiguous(), qpos, kpos, window, qtw,
+    )
+    return out
+
+
 @triton.jit
 def _prefill_prep(
     QRGS,

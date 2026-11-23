@@ -1,0 +1,41 @@
+--- a/exl3_moe_single.sycl
++++ b/exl3_moe_single.sycl
+@@ -470,7 +470,10 @@
+     static ESIMD_INLINE int a_off(int buf, int pj, int i, int m) { return (((buf * 2 + pj) * 8 + i) * MB + m) * 16 * 2; }
+ 
+     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+-        slm_init<SLM_A + SLM_E>();
++        // The epilogue starts after a workgroup barrier and can reuse the input tile storage.
++        constexpr int epilogue = MB >= 48 ? 0 : SLM_A;
++        slm_init<epilogue + SLM_E>();
++        static_assert(MB < 48 || SLM_A <= SLM_E);
+         int t = it.get_local_id(0), T = it.get_local_range(0);
+         int b = it.get_group(0) / partitions;
+         int part = it.get_group(0) % partitions;
+@@ -558,14 +561,14 @@
+                     simd<float, NT * 16> o;
+ #pragma unroll
+                     for (int j = 0; j < NT; ++j) o.template select<16, 1>(j * 16) = acc.template select<16, 1>((j * MB + m) * 16);
+-                    slm_block_store<float, NT * 16>(SLM_A + (m * 256 + proj * 128 + hf * NT * 16) * 4, o);
++                    slm_block_store<float, NT * 16>(epilogue + (m * 256 + proj * 128 + hf * NT * 16) * 4, o);
+                 }
+             }
+             barrier();
+             const int nb = part * (part_cols / 128) + local_nb;
+             for (int m = t; m < rows; m += T) {
+-                simd<float, 128> g = slm_block_load<float, 128>(SLM_A + (m * 256) * 4);
+-                simd<float, 128> u = slm_block_load<float, 128>(SLM_A + (m * 256 + 128) * 4);
++                simd<float, 128> g = slm_block_load<float, 128>(epilogue + (m * 256) * 4);
++                simd<float, 128> u = slm_block_load<float, 128>(epilogue + (m * 256 + 128) * 4);
+                 fwht128(g); fwht128(u);
+                 g = convert<float>(convert<fp16>(g * kRsqrt128 * convert<float>(block_load<fp16, 128>(svg + nb * 128))));
+                 u = convert<float>(convert<fp16>(u * kRsqrt128 * convert<float>(block_load<fp16, 128>(svg + I + nb * 128))));
+@@ -1351,7 +1354,7 @@
+     if (M >= g_prefill_min_m) {
+         if (K == 3) return moe_prefill<3>(x, topk_ids, topk_w, ptrs, gm, E, out);
+         if (K == 4 && M >= 2048 && gm.H == 2304 && gm.I == 1152)
+-            return moe_prefill<4, false, 48>(x, topk_ids, topk_w, ptrs, gm, E, out);
++            return moe_prefill<4, false, 64>(x, topk_ids, topk_w, ptrs, gm, E, out);
+         if (K == 4) return moe_prefill<4>(x, topk_ids, topk_w, ptrs, gm, E, out);
+     }
+     bool pair_mode = M <= g_pair_max_m;

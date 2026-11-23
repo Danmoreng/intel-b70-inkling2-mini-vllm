@@ -29,7 +29,13 @@ case ${INKLING2_PREFILL_PROFILE:-reference} in
         export INKLING2_PREFILL_DENSE_BF16=${INKLING2_PREFILL_DENSE_BF16:-1}
         export INKLING2_PREFILL_DEPTH=${INKLING2_PREFILL_DEPTH:-1}
         export INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-1}
-        export INKLING2_PREFILL_LOCAL_BIAS=${INKLING2_PREFILL_LOCAL_BIAS:-table}
+        local_bias=table
+        fused_lib=/lab/.work/build/inkling2-vllm-fused-bias.so
+        if [[ ${INKLING2_LIB:-$fused_lib} == "$fused_lib" && -s "${fused_lib#/lab/}" ]]; then
+            export INKLING2_LIB=$fused_lib
+            local_bias=fused
+        fi
+        export INKLING2_PREFILL_LOCAL_BIAS=${INKLING2_PREFILL_LOCAL_BIAS:-$local_bias}
         export INKLING2_PREFILL_OUTPUT_CONV=${INKLING2_PREFILL_OUTPUT_CONV:-1}
         export INKLING2_PREFILL_PREFIX_IO=${INKLING2_PREFILL_PREFIX_IO:-1}
         export INKLING2_PREFILL_PREP=${INKLING2_PREFILL_PREP:-1}
@@ -54,9 +60,13 @@ case ${INKLING2_PREFILL_PROFILE:-reference} in
 esac
 export INKLING2_VLLM_KV_TYPE=fp8_e4m3 INKLING2_EXL3_PAIR_MAX=8
 expert_lib=/lab/.work/build/inkling2-exl3-moe-mb32.so
-large_prefill_lib=/lab/.work/build/inkling2-exl3-moe-mb32-48.so
-if [[ ${INKLING2_PREFILL_PROFILE:-reference} == optimized && -s "${large_prefill_lib#/lab/}" ]]; then
-    expert_lib=$large_prefill_lib
+if [[ ${INKLING2_PREFILL_PROFILE:-reference} == optimized ]]; then
+    for large_prefill_lib in /lab/.work/build/inkling2-exl3-moe-mb32-{64,48}.so; do
+        if [[ -s "${large_prefill_lib#/lab/}" ]]; then
+            expert_lib=$large_prefill_lib
+            break
+        fi
+    done
 fi
 export INKLING2_EXL3_MOE_LIB=${INKLING2_EXL3_MOE_LIB:-$expert_lib}
 export INKLING2_CONTROL_LIB=/lab/.work/build/inkling2-loop-control.so

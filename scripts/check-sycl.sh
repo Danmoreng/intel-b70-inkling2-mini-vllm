@@ -13,13 +13,13 @@ source_file=xpu/csrc/inkling2_ops.sycl
 mode=${1:-paged}
 minutes=9
 case "$mode" in
-    paged) ;;
+    paged|paged-fused) ;;
     exl3)
         patch_file="$PWD/patches/trellis-inkling-exl3-mcg-situ.patch"
         source_file=xpu/csrc/exl3_moe.sycl
         minutes=12
         ;;
-    *) echo 'Use paged or exl3.' >&2; exit 2 ;;
+    *) echo 'Use paged, paged-fused or exl3.' >&2; exit 2 ;;
 esac
 deadline=$(TZ=Europe/Berlin date -d 'today 22:45' +%s)
 if (( $(date +%s) + minutes * 60 >= deadline )); then
@@ -59,7 +59,7 @@ if [[ "$mode" == exl3 ]]; then
     mkdir -p .work/python
     ln -sfn ../trellis-serve/xpu/exl3xpu .work/python/inkling_trellis
     tile_rows=${INKLING2_EXL3_TILE_ROWS:-16}
-    case "$tile_rows" in 16|32|48|32-48) ;; *) echo 'Use 16, 32, 48 or 32-48 tile rows.' >&2; exit 2;; esac
+    case "$tile_rows" in 16|32|48|32-48|32-64) ;; *) echo 'Use 16, 32, 48, 32-48 or 32-64 tile rows.' >&2; exit 2;; esac
     lib_name=inkling2-exl3-moe.so
     if [[ "$tile_rows" != 16 ]]; then
         lib_name="inkling2-exl3-moe-mb$tile_rows.so"
@@ -72,8 +72,12 @@ if [[ "$mode" == exl3 ]]; then
         rm -f -- "$output/$lib_name.new"
         patch --silent --batch --fuzz=0 --output="$output/exl3_moe_single.sycl" "$vendor/$source_file" \
             "$PWD/patches/trellis-inkling-exl3-single-row.patch"
-        if [[ "$tile_rows" == 32-48 ]]; then
+        if [[ "$tile_rows" == 32-48 || "$tile_rows" == 32-64 ]]; then
             patch --silent --batch --fuzz=0 "$output/exl3_moe_single.sycl" < "$PWD/patches/trellis-inkling-exl3-large-prefill.patch"
+            if [[ "$tile_rows" == 32-64 ]]; then
+                patch --silent --batch --fuzz=0 "$output/exl3_moe_single.sycl" < "$PWD/patches/trellis-inkling-exl3-reuse-slm.patch"
+                patch --silent --batch --fuzz=0 "$output/exl3_moe_single.sycl" < "$PWD/patches/trellis-inkling-exl3-shared-input.patch"
+            fi
             tile_rows=32
         fi
         timeout --kill-after=10s 8m docker run --rm --name "$build_name" --network none \
@@ -103,22 +107,34 @@ if [[ "$mode" == exl3 ]]; then
     exit
 fi
 
+lib_name=inkling2-vllm.so
+source_mount=()
+check_args=()
+if [[ "$mode" == paged-fused ]]; then
+    lib_name=inkling2-vllm-fused-bias.so
+    staged="$output/inkling2_fused_bias.sycl"
+    patch --silent --batch --fuzz=0 --output="$staged" "$vendor/$source_file" \
+        "$PWD/patches/trellis-inkling-fused-local-bias.patch"
+    source_mount=(--mount "type=bind,source=$staged,target=/opt/trellis-serve/$source_file,readonly")
+    check_args=(--fused-bias)
+fi
+rm -f -- "$output/$lib_name.new"
 if ! timeout --kill-after=10s 5m docker run --rm --name "$build_name" --network none \
     --cpus 3 --memory 4g --user "$owner" \
     --mount "type=bind,source=$vendor,target=/opt/trellis-serve,readonly" \
-    --mount "type=bind,source=$output,target=/build" \
-    --env INKLING2_OUT=/build/inkling2-vllm.so.new --entrypoint /bin/bash "$builder" \
+    "${source_mount[@]}" --mount "type=bind,source=$output,target=/build" \
+    --env "INKLING2_OUT=/build/$lib_name.new" --entrypoint /bin/bash "$builder" \
     /opt/trellis-serve/xpu/scripts/build_inkling2.sh >"$output/compile.log" 2>&1; then
     tail -60 "$output/compile.log" >&2
     exit 1
 fi
 
-library=/lab/.work/build/inkling2-vllm.so.new
+library=/lab/.work/build/$lib_name.new
 timeout --kill-after=10s 3m docker run --rm --name "$check_name" --network none \
     --cpus 3 --memory 3g --device "$(readlink -f -- "$render_node")" \
     --mount "type=bind,source=$PWD,target=/lab,readonly" \
-    --env PYTHONPATH=/lab:/lab/.work/trellis-serve/xpu --env PYTHONDONTWRITEBYTECODE=1 \
+    --env PYTHONPATH=/lab:/lab/.work/python:/lab/.work/trellis-serve/xpu --env PYTHONDONTWRITEBYTECODE=1 \
     --env INKLING2_LIB="$library" --env SYCL_CACHE_PERSISTENT=0 \
-    --entrypoint /opt/venv/bin/python "$runtime" /lab/tests/check_sycl.py "$library" \
+    --entrypoint /opt/venv/bin/python "$runtime" /lab/tests/check_sycl.py "$library" "${check_args[@]}" \
     | tee "$output/parity.log"
-mv -- "$output/inkling2-vllm.so.new" "$output/inkling2-vllm.so"
+mv -- "$output/$lib_name.new" "$output/$lib_name"

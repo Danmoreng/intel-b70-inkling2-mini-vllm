@@ -35,8 +35,9 @@ def main():
     layer = args.layer
     expert_ids = (0, 3, 11, 16, 22, 31, 53, 64, 87, 99, 102, 127)
     shard = args.checkpoint / f"exl3-layer-{layer:02d}.safetensors"
-    packed, weights = [], []
+    packed, weights, expert_scales = [], [], []
     for projections in read_experts(shard, layer, expert_ids):
+        expert_scales.append(torch.stack([proj["suh"].half().reshape(-1) for proj in projections[:2]]))
         packed.append(pack_expert(*projections, 4))
         weights.append([weight_orig(**projection, K=4, cb=CB_MCG) for projection in projections])
 
@@ -44,6 +45,9 @@ def main():
     expert_ptrs = torch.arange(len(packed), device="xpu", dtype=torch.int64) * arena.stride(0) + arena.data_ptr()
     if args.small_dpas:
         ops().moe_set_tiny_dpas(4, 9, 18)
+    shared = getattr(ops(), "moe_shared_prefill", None)
+    common_scales = all(torch.equal(scales, expert_scales[0]) for scales in expert_scales)
+    scales_device = expert_scales[0].to("xpu") if shared is not None and common_scales else None
     kernel = ops().moe_forward
     generator = torch.Generator().manual_seed(23800 + layer)
     for dtype in (torch.float16, torch.bfloat16):
@@ -58,6 +62,10 @@ def main():
             device_inputs = [tensor.to("xpu") for tensor in (activation, indices, routing)]
             call_args = (*device_inputs, expert_ptrs, 1152, 4, len(packed))
             output = kernel(*call_args).cpu().float()
+            if tokens >= 2048 and scales_device is not None:
+                shared_output = shared(*device_inputs, expert_ptrs, scales_device).cpu().float()
+                assert torch.equal(output, shared_output), "Shared input transform changed expert output"
+                print(f"shared-input parity layer={layer} dtype={dtype} tokens={tokens}", flush=True)
             torch.xpu.synchronize()
             started = perf_counter()
             for _ in range(10):
