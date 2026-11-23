@@ -68,7 +68,9 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         if self.want_dspark and spec.num_speculative_tokens not in (1, 3, 7) and not self.arbitrary_rows:
             raise ValueError("This DSpark width requires FP8 KV and both target XMX attention kernels")
         self.capture_rows = {1, spec.num_speculative_tokens + 1} if self.want_dspark else {1}
-        if self.want_dspark and os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1":
+        variable_width = (os.environ.get("INKLING2_DSPARK_ADAPTIVE", "0") == "1"
+                          or os.environ.get("INKLING2_NGRAM_DRAFT", "0") == "1")
+        if self.want_dspark and variable_width:
             if vllm_config.scheduler_config.async_scheduling:
                 raise ValueError("Adaptive DSpark requires synchronous scheduling")
             if not self.arbitrary_rows:
@@ -95,6 +97,9 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         ])
 
     def load_weights(self, weights):
+        if os.environ.get("INKLING2_ONEDNN_DETERMINISTIC") == "1":
+            # oneDNN otherwise picks reduction orders per call, so identical bf16 GEMMs can differ run to run.
+            torch.backends.mkldnn.deterministic = True
         device = torch.device("xpu", torch.xpu.current_device())
         min_dpas = int(os.environ.get("INKLING2_EXL3_PREFILL_MIN", "1025"))
         moe_ops().moe_set_prefill_min_m(min_dpas)
