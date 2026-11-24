@@ -1,5 +1,7 @@
 """Tiled prefill operations for the single-sequence Inkling adapter."""
 
+import os
+
 import torch
 import triton
 import triton.language as tl
@@ -12,6 +14,7 @@ def _short_conv(
     Dynamic,
     History,
     Tags,
+    Res,
     Out,
     T,
     start,
@@ -24,6 +27,7 @@ def _short_conv(
     ROWS: tl.constexpr,
     COLS: tl.constexpr,
     HAS_DYNAMIC: tl.constexpr,
+    HAS_RES: tl.constexpr,
 ):
     row = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
     col = tl.program_id(1) * COLS + tl.arange(0, COLS)
@@ -58,11 +62,17 @@ def _short_conv(
         result = (now + (acc + dyn_acc)) * (1.0 / 3.0)
     else:
         result = (now + acc) * (1.0 / 2.23606797749979)
+    if HAS_RES:
+        # The caller's residual add (residual + conv), fused; FP32 addition is commutative, so this is bit-exact.
+        result = tl.load(Res + row[:, None] * WIDTH + col[None, :], live, 0) + result
     tl.store(Out + row[:, None] * WIDTH + col[None, :], result, live)
 
 
-def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
+def prefill_conv(x, weight, history, tags, start, offset, dynamic=None, residual=None):
     rows, channels = x.shape
+    if residual is not None and (residual.dtype != torch.float32 or residual.shape != x.shape
+                                 or not residual.is_contiguous()):
+        raise ValueError("prefill_conv residual must be a contiguous FP32 tensor shaped like x")
     ring_size = history.shape[0]
     out = torch.empty((rows, channels), device=x.device, dtype=torch.float32)
     if x.stride(-1) != 1:
@@ -76,6 +86,7 @@ def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
         dynamic if dynamic is not None else x,
         history,
         tags,
+        residual if residual is not None else out,
         out,
         rows,
         start,
@@ -88,6 +99,7 @@ def prefill_conv(x, weight, history, tags, start, offset, dynamic=None):
         8,
         128,
         dynamic is not None,
+        residual is not None,
         num_warps=4,
         enable_fp_fusion=False,
     )
@@ -256,6 +268,103 @@ def prefill_prep(qrgs, k, v, pos, qscale, rscale, qlim, rlim, alpha, floor):
         num_warps=4,
     )
     return q, r, gate, sink, key, value
+
+
+_PACKED_PROJECTIONS = {}
+
+
+def packed_projection(proj):
+    """FP16 high/low split of the [16, E] relative projection as prefill_attn_rel reads it: int32 [8, E] K-pair packed
+    (low half = even row), distance axis reversed. Same split as the Triton table kernel (RNE casts)."""
+    key = (proj.data_ptr(), tuple(proj.shape))
+    packed = _PACKED_PROJECTIONS.get(key)
+    if packed is None:
+        width, extent = proj.shape
+        if width != 16 or extent % 16:
+            raise ValueError("Unexpected Inkling local relative projection geometry")
+        hi = proj.half()
+        lo = (proj - hi.float()).half()
+        packed = tuple(t.flip(-1).reshape(8, 2, extent).permute(0, 2, 1).contiguous().view(torch.int32).reshape(8, extent)
+                       for t in (hi, lo))
+        _PACKED_PROJECTIONS[key] = packed
+    return packed
+
+
+_REL_OPS = None
+
+
+def rel_ops():
+    """torch.ops.inkling2_rel (INKLING2_REL_LIB, scripts/build-rel-attention.sh): the 256-GRF AOT prefill attention."""
+    global _REL_OPS
+    if _REL_OPS is None:
+        torch.ops.load_library(os.environ.get("INKLING2_REL_LIB", "/lab/.work/build/inkling2-rel-attention.so"))
+        _REL_OPS = torch.ops.inkling2_rel
+    return _REL_OPS
+
+
+def attention_prefill_rel(q, k, v, qpos0, kpos0, r, proj, sink, *, window, qtw):
+    """attention_prefill_esimd with the local relative bias computed in the kernel from r [n, H, 16] and proj [16, E]."""
+    hi, lo = packed_projection(proj)
+    o = torch.empty(q.shape, device=q.device, dtype=torch.float32)
+    rel_ops().prefill_attn_rel(q.to(torch.float16).contiguous(), k.to(torch.float16).contiguous(),
+                                            v.to(torch.float16).contiguous(), o, r.float().contiguous(), hi, lo,
+                                            sink.float().contiguous(), int(qpos0), int(kpos0), int(window), int(qtw))
+    return o
+
+
+@triton.jit
+def _global_bias(R, P, B, N, E: tl.constexpr, ROWS: tl.constexpr, COLS: tl.constexpr):
+    flat = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
+    col = tl.program_id(1) * COLS + tl.arange(0, COLS)
+    live = flat < N
+    acc = tl.zeros((ROWS, COLS), tl.float32)
+    # One FMA chain over the 16 relative channels in order: bitwise what the FP32 einsum (oneDNN) computes here.
+    for d in tl.static_range(16):
+        a = tl.load(R + flat * 16 + d, live, 0)
+        acc = tl.fma(a[:, None], tl.load(P + d * E + col)[None, :], acc)
+    tl.store(B + flat[:, None] * E + col[None, :], acc.to(tl.bfloat16), live[:, None])
+
+
+def global_bias(r, projection):
+    """torch.einsum("thr,re->the", r, projection).to(bfloat16) in one pass (no FP32 table)."""
+    rows, heads, width = r.shape
+    extent = projection.shape[-1]
+    if width != 16 or extent % 128:
+        raise ValueError("Unexpected Inkling relative projection geometry")
+    r, projection = r.float().contiguous(), projection.float().contiguous()
+    table = torch.empty((rows, heads, extent), device=r.device, dtype=torch.bfloat16)
+    _global_bias[(triton.cdiv(rows * heads, 64), extent // 128)](r, projection, table, rows * heads, extent, 64, 128,
+                                                                 num_warps=8, enable_fp_fusion=False)
+    return table
+
+
+def attention_prefill_table(q, k, v, qpos0, kpos0, table, sink, *, window=0, qtw=4, lse=None):
+    """attention_prefill_esimd on the 256-GRF build (inkling2_rel.prefill_attn); same outputs, bit for bit."""
+    o = torch.empty(q.shape, device=q.device, dtype=torch.float32)
+    rel_ops().prefill_attn(q.to(torch.float16).contiguous(), k.to(torch.float16).contiguous(), v.to(torch.float16).contiguous(),
+                           o, table.to(torch.bfloat16).contiguous(), sink.float().contiguous(), int(qpos0), int(kpos0),
+                           int(window), int(qtw), lse)
+    return o
+
+
+@triton.jit
+def _gate_bf16(O, G, Out, N, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    live = i < N
+    o = tl.load(O + i, live, 0)
+    g = tl.load(G + i, live, 0)
+    tl.store(Out + i, (o * g).to(tl.bfloat16), live)
+
+
+def gate_bf16(o, gate):
+    """bf16(o * gate) in one pass: the attention output gate and the cast in front of the BF16 output projection."""
+    if o.dtype != torch.float32 or gate.dtype != torch.float32 or o.shape != gate.shape:
+        raise ValueError("gate_bf16 expects FP32 tensors of one shape")
+    o, gate = o.contiguous(), gate.contiguous()
+    out = torch.empty(o.shape, device=o.device, dtype=torch.bfloat16)
+    n = o.numel()
+    _gate_bf16[(triton.cdiv(n, 4096),)](o, gate, out, n, 4096, num_warps=16, enable_fp_fusion=False)
+    return out
 
 
 def bf16_prefill_linear(linear, x):

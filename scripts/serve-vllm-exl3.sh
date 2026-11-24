@@ -19,7 +19,11 @@ deadline=$(TZ=Europe/Berlin date -d 'today 22:44' +%s)
 seconds=$(( deadline - $(date +%s) ))
 (( seconds > 120 ))
 test -c "$render_node"
-for lib in "${INKLING2_LIB:-/lab/.work/build/inkling2-vllm.so}" "${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}"; do
+libs=("${INKLING2_LIB:-/lab/.work/build/inkling2-vllm.so}" "${INKLING2_EXL3_MOE_LIB:-/lab/.work/build/inkling2-exl3-moe.so}")
+if [[ ${INKLING2_PREFILL_REL_BIAS:-0} == 1 || ${INKLING2_PREFILL_GLOBAL_TABLE:-0} == 1 ]]; then
+    libs+=("${INKLING2_REL_LIB:-/lab/.work/build/inkling2-rel-attention.so}")  # scripts/build-rel-attention.sh
+fi
+for lib in "${libs[@]}"; do
     if [[ $lib == /lab/* && ! -s ${lib#/lab/} ]]; then
         echo "Missing build artifact: ${lib#/lab/}" >&2
         exit 1
@@ -61,7 +65,8 @@ check_vendor_patch() {
     git -C "$vendor" diff -- "$source_file" | cmp - "$patch_file"
 }
 check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
-    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588 e30e35e03f57f17cffcc585f14ccab74839952db47c8effaea4d86d5fb6bfa70
+    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588 e30e35e03f57f17cffcc585f14ccab74839952db47c8effaea4d86d5fb6bfa70 \
+    247ae4654c103fc199ca725c0c71b5ae91142625a03029fb30da30ed603d2f80
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
 check_vendor_patch xpu/exl3xpu/inkling2/vendor/inkling2_vision.py trellis-inkling-vision-qkv.patch
 
@@ -221,6 +226,10 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_PREFILL_KV_CONV=${INKLING2_PREFILL_KV_CONV:-0}" \
     --env "INKLING2_PREFILL_OUTPUT_CONV=${INKLING2_PREFILL_OUTPUT_CONV:-0}" \
     --env "INKLING2_PREFILL_LOCAL_BIAS=${INKLING2_PREFILL_LOCAL_BIAS:-0}" \
+    --env "INKLING2_PREFILL_GLUE=${INKLING2_PREFILL_GLUE:-0}" \
+    --env "INKLING2_PREFILL_REL_BIAS=${INKLING2_PREFILL_REL_BIAS:-0}" \
+    --env "INKLING2_PREFILL_GLOBAL_TABLE=${INKLING2_PREFILL_GLOBAL_TABLE:-0}" \
+    --env "INKLING2_REL_LIB=${INKLING2_REL_LIB:-/lab/.work/build/inkling2-rel-attention.so}" \
     --env "INKLING2_NATIVE_DEPTH_MIX=${INKLING2_NATIVE_DEPTH_MIX:-0}" \
     --env "INKLING2_QKV_LIB=${INKLING2_QKV_LIB:-}" \
     --env "INKLING2_QKV_SPLITS=${INKLING2_QKV_SPLITS:-2}" \

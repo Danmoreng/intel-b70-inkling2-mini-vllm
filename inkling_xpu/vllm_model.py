@@ -56,6 +56,12 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         self.fuse_local_projection = local_bias == "fused"
         self.prefill_kv_conv = os.environ.get("INKLING2_PREFILL_KV_CONV", "0") == "1"
         self.prefill_output_conv = os.environ.get("INKLING2_PREFILL_OUTPUT_CONV", "0") == "1"
+        # Bit-exact prefill glue fusion (BF16 copies from producers, residual adds in the output convs, gate+cast).
+        self.prefill_glue = os.environ.get("INKLING2_PREFILL_GLUE", "0") == "1"
+        # Local-layer relative bias inside the 256-GRF prefill attention (INKLING2_REL_LIB, scripts/build-rel-attention.sh).
+        self.prefill_rel_bias = os.environ.get("INKLING2_PREFILL_REL_BIAS", "0") == "1"
+        # Global layers: one-pass BF16 bias table and the 256-GRF table attention (both bit-identical).
+        self.prefill_global_table = os.environ.get("INKLING2_PREFILL_GLOBAL_TABLE", "0") == "1"
         self.enable_ring_prefix = cache.enable_prefix_caching
         self.ring_high = self.saved_frontier = 0
         self.saved_rings = []
@@ -195,32 +201,41 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
         return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
                             queries_per_request=self._st_nq, num_splits=splits)
 
-    def _control_norm(self, il, module, cur, msg, weight):
+    def _control_norm(self, il, module, cur, msg, weight, dtypes=None):
         if self.prefill_controller and not self._static and cur.shape[0] > 8:
             down = self.lin[f"layers.{il}.controllers.{module}.down_weight"]
             up, _ = self.fused[il, "gf" + module]
             if down.w8a8 is None and up.w8a8 is None:
                 from .prefill_controller import controller
-                return controller(cur, msg, weight, down.w, up.w)
-        return super()._control_norm(il, module, cur, msg, weight)
+                return controller(cur, msg, weight, down.w, up.w, **({"dtypes": dtypes} if dtypes else {}))
+        out = super()._control_norm(il, module, cur, msg, weight)
+        if not dtypes:
+            return out
+        copies = tuple(out.to(t) for t in dtypes)
+        return copies[0] if len(copies) == 1 else copies
 
-    def _conv(self, vi, name, x, weight, dynamic, reqs, pos):
+    def _conv(self, vi, name, x, weight, dynamic, reqs, pos, residual=None):
         if self.batch_layout is not None:
             if dynamic is not None or name not in ("mlp_out", "attn_out"):
                 raise RuntimeError("The batched preparation kernel owns K/V convolutions")
-            return torch.ops.inkling_prep.output_conv(x.float().contiguous(), weight, self.conv[vi], self.conv_pos, pos,
-                                                      *self._prep_layout, self.conv_ch[name][0])
+            out = torch.ops.inkling_prep.output_conv(x.float().contiguous(), weight, self.conv[vi], self.conv_pos, pos,
+                                                     *self._prep_layout, self.conv_ch[name][0])
+            return out if residual is None else residual + out
         use_prefill_conv = self.prefill_output_conv if name in ("attn_out", "mlp_out") else self.prefill_kv_conv
         if use_prefill_conv and not self._static:
             from .prefill_kernels import prefill_conv
             offset, _ = self.conv_ch[name]
+            fused = residual is not None and residual.dtype == torch.float32 and residual.is_contiguous() \
+                and residual.shape == x.shape
             outputs = []
             for slot, first, count, start in reqs:
                 rows = slice(first, first + count)
                 outputs.append(prefill_conv(x[rows], weight, self.conv[vi, slot], self.conv_pos[slot],
-                                            start, offset, None if dynamic is None else dynamic[rows]))
-            return outputs[0] if len(outputs) == 1 else torch.cat(outputs)
-        return super()._conv(vi, name, x, weight, dynamic, reqs, pos)
+                                            start, offset, None if dynamic is None else dynamic[rows],
+                                            residual[rows] if fused else None))
+            out = outputs[0] if len(outputs) == 1 else torch.cat(outputs)
+            return out if residual is None or fused else residual + out
+        return super()._conv(vi, name, x, weight, dynamic, reqs, pos, residual)
 
     def _prefill_global(self, visit, q, k, v, table, sink, reqs, batch):
         key_cache, value_cache = self._pages(visit, batch)
@@ -256,11 +271,18 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             if self.prefill_prefix_io and not self.packed_kv:
                 from .prefix_io import read_heads as gather_heads
                 read_heads = partial(gather_heads, key_cache, value_cache, batch.block_table[0])
+            attn = None
+            if self.prefill_global_table:
+                from .prefill_kernels import rel_ops
+                attn = rel_ops().prefill_attn
             return hybrid_prefill(q, table, sink, batch.first_position, batch.total_tokens,
                                    self.prefix_block, read_kv, split_alignment=self.page_tokens if self.tight_prefix else None,
-                                   read_heads=read_heads)
+                                   read_heads=read_heads, prefill_attn=attn)
         else:
             keys, values = read_kv(0, batch.total_tokens)
+        if self.prefill_global_table:
+            from .prefill_kernels import attention_prefill_table
+            return attention_prefill_table(q, keys, values, batch.first_position, 0, table, sink, qtw=4)
         return attention_prefill_esimd(q, keys, values, batch.first_position, 0, table, sink, qtw=4)
 
     def _metadata(self, size, device):
