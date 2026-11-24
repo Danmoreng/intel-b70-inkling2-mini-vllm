@@ -86,6 +86,10 @@ bash scripts/check-coding-kernels.sh
 
 Decode groups Q, K and V into one Intel XMX projection. It splits each activation into two signed INT8 terms against the existing group-32 weights. A second SYCL kernel computes the short convolutions, clips the attention heads and writes the local KV ring. The prefill path retains its original weight representation.
 
+With the coding launcher running in DSpark mode, run
+`python3 tests/check_strict_json.py` to check zero-budget JSON and the
+speculative reasoning-to-answer boundary on the pinned vLLM runtime.
+
 The API listens on loopback port 8093. For text with tools, use
 `/v1/chat/completions`, the model name `inkling2-mini-exl3-b70`, and standard
 OpenAI tool definitions. Set the `reasoning_effort` field explicitly when
