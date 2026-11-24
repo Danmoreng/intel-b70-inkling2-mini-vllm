@@ -46,6 +46,8 @@ class InklingEXL3Experts:
         if self.shared_scales is not None:
             self.shared_scales = self.shared_scales.to(device)
 
+    bf16_input = True  # the kernels consume BF16 activations, so the prefill glue may hand them over uncast
+
     def __call__(self, hidden, indices, routing):
         inputs = hidden.to(torch.bfloat16).contiguous(), indices.int().contiguous(), routing.float().contiguous()
         if self.shared_scales is not None and hidden.shape[0] >= 2048 and indices.shape[1] == 8:
