@@ -50,6 +50,8 @@ class InklingDraft:
         self.offsets = torch.arange(self.block, dtype=torch.long, device=device)
         self.split_attention = os.environ.get("INKLING2_DSPARK_BLOCK", "0") == "1"
         self.fp8_global = self.split_attention and os.environ.get("INKLING2_DRAFT_FP8_GLOBAL", "0") == "1"
+        self.share_values = (self.split_attention and not self.fp8_global
+                             and os.environ.get("INKLING2_DRAFT_SHARED_VALUES") == "1")
         self.graph_enabled = os.environ.get("INKLING2_DSPARK_GRAPH", "0") == "1"
         if self.graph_enabled and not self.split_attention:
             raise ValueError("The DSpark graph requires the fixed-layout split attention kernel")
@@ -231,7 +233,7 @@ class InklingDraft:
                 kv[0, rows + capacity], kv[1, rows + capacity] = k, v
         kv[0, rows], kv[1, rows] = k, v
 
-    def attend_block(self, i, q, k, v, positions, start, splits):
+    def attend_block(self, i, q, k, v, positions, start, splits, *, shared_values=False):
         self.write_rows(i, positions, k, v)
         kv = self.kv[i]
         capacity = self.capacities[i]
@@ -241,6 +243,8 @@ class InklingDraft:
         query = q.to(torch.float16).contiguous()
         if self.fp8_global and not capacity:
             torch.ops.inkling2_xpu.draft_global_xmx(query, kv[0], kv[1], start, out, lse)
+        elif shared_values and not capacity:
+            torch.ops.inkling2_xpu.dspark_attention_shared_values(query, kv[0], kv[1], start, out, lse)
         else:
             torch.ops.inkling2_xpu.dspark_attention(
                 query, kv[0], kv[1], start, out, lse, capacity, self.window if capacity else 0
@@ -251,30 +255,35 @@ class InklingDraft:
         if steps >= self.block:
             raise ValueError("DSpark needs an anchor and one noise row per proposed token")
         splits = min(512, max(16, 1 << max(0, (max(upper, 1) - 1).bit_length() - 7)))
+        # Preserve the split layout and enable staging only where the FP16
+        # global history is large enough for a measured reduction in latency.
+        shared_values = (self.share_values and upper >= 245_760
+                         and hasattr(torch.ops.inkling2_xpu, "dspark_attention_shared_values"))
+        signature = (splits, shared_values)
         if not self.split_attention:
             return self._block(target, anchor, start, steps, splits)
         position = start
-        if not self.graph_enabled or splits not in self.warmed:
-            self.warmed.add(splits)
-            return self._block(target, anchor, position, steps, splits)
-        if self.graph_state is None or self.graph_state[0] != splits:
+        if not self.graph_enabled or signature not in self.warmed:
+            self.warmed.add(signature)
+            return self._block(target, anchor, position, steps, splits, shared_values=shared_values)
+        if self.graph_state is None or self.graph_state[0] != signature:
             buf_id, buf_pos = anchor.clone(), position.clone()
             graph = torch.xpu.XPUGraph()
             with torch.xpu.graph(graph):
-                output = self._block(target, buf_id, buf_pos, steps, splits)
-            self.graph_state = (splits, graph, buf_id, buf_pos, output)
+                output = self._block(target, buf_id, buf_pos, steps, splits, shared_values=shared_values)
+            self.graph_state = (signature, graph, buf_id, buf_pos, output)
         _, graph, buf_id, buf_pos, output = self.graph_state
         buf_id.copy_(anchor)
         buf_pos.copy_(position)
         graph.replay()
         if self.debug_replay and self.graph_checks < 8:
-            reference = self._block(target, anchor, position, steps, splits)
+            reference = self._block(target, anchor, position, steps, splits, shared_values=shared_values)
             if not torch.equal(output, reference):
                 raise RuntimeError("DSpark graph proposals differ from an eager pass at the same position")
             self.graph_checks += 1
         return output
 
-    def _block(self, target, anchor, start, steps, splits, drafts=None, sampling=None):
+    def _block(self, target, anchor, start, steps, splits, drafts=None, sampling=None, *, shared_values=False):
         batch_size = anchor.numel()
         if drafts is None:
             positions = self.offsets + start
@@ -303,7 +312,7 @@ class InklingDraft:
                                                       start[row:row + 1], splits))
                 h = torch.cat(outputs)
             elif self.split_attention:
-                h = self.attend_block(i, q, k, v, positions, start, splits)
+                h = self.attend_block(i, q, k, v, positions, start, splits, shared_values=shared_values)
             else:
                 if i in self.local:
                     rows = torch.arange(max(0, start - self.window), start, device=x.device).remainder(

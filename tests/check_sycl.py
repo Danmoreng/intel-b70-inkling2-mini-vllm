@@ -170,11 +170,31 @@ def check_fused_bias():
         print(f"Fused local bias, {rows} rows at {start}, residual={residual}, relative_l2={rel_l2:.5g}")
 
 
+def check_draft_shared_values():
+    ops = torch.ops.inkling2_xpu
+    device = "xpu"
+    rows, context = 8, 509
+    q = torch.randn(rows, 24, 128, device=device, dtype=torch.float16)
+    k = torch.randn(context + rows + 3, 8, 128, device=device, dtype=torch.float16)
+    v = torch.randn_like(k)
+    start = torch.tensor([context], device=device, dtype=torch.int32)
+    for splits in (3, 16):
+        reference = torch.empty(splits, rows, 24, 128, device=device)
+        reference_lse = torch.empty(splits, rows, 24, device=device)
+        actual, actual_lse = torch.empty_like(reference), torch.empty_like(reference_lse)
+        ops.dspark_attention(q, k, v, start, reference, reference_lse, 0, 0)
+        ops.dspark_attention_shared_values(q, k, v, start, actual, actual_lse)
+        torch.testing.assert_close(actual, reference, atol=0, rtol=0)
+        torch.testing.assert_close(actual_lse, reference_lse, atol=0, rtol=0)
+    print("Shared FP16 draft values match the original partials and normalizers", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library")
     parser.add_argument("--fused-bias", action="store_true")
     parser.add_argument("--batch", action="store_true")
+    parser.add_argument("--draft-shared-values", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(2)
     torch.manual_seed(2026)
@@ -195,6 +215,8 @@ def main():
     if args.batch:
         from check_batch_xmx import check as check_batch
         check_batch()
+    if args.draft_shared_values:
+        check_draft_shared_values()
     torch.xpu.synchronize()
     print("PASS: 16 block-table cases, 1 legacy table case, 3 prefill cases and both MoE formats", flush=True)
 

@@ -1,0 +1,112 @@
+--- a/inkling2_ops.sycl
++++ b/inkling2_ops.sycl
+@@ -542,7 +542,7 @@
+ constexpr int QR = 8, KT = 16, KBT = 2, KB = KT * KBT;
+ constexpr float LOG2E = 1.4426950408889634f, NEG = -1e30f;
+ 
+-template <int D, bool split_block = false, bool fused_bias = false>
++template <int D, bool split_block = false, bool fused_bias = false, bool share_values = false>
+ struct Kern {
+     const fp16* q; const fp16* k; const fp16* v; float* o; float* lse;
+     const uint16_t* table; const float* sink;
+@@ -556,6 +556,10 @@
+ 
+     void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
+         constexpr int NC = D / 16;
++        constexpr int tile_bytes = KT * 16 * sizeof(fp16);
++        static_assert(!share_values || split_block, "Value sharing expects one query tile per KV head");
++        if constexpr (share_values)
++            slm_init<NC * KBT * tile_bytes>();
+         // work-group = G heads x QTW adjacent query tiles of one kv head (they stream the same keys: L1 sharing)
+         int id = it.get_global_id(0);
+         int g = id % G, t1 = id / G, qti = t1 % QTW, t2 = t1 / QTW, kvh = t2 % Hk, qt = (t2 / Hk) * QTW + qti;
+@@ -624,6 +628,18 @@
+         unsigned surfW = D * 2 - 1, surfH = (unsigned)(length + trim) - 1, pitch = (unsigned)Hk * D * 2 - 1;
+         for (int kb0 = lo; kb0 < hi; kb0 += KB) {
+             const int src_row = kb0 + (split_block && kb0 >= prefix_tokens ? trim : 0);
++            if constexpr (share_values) {
++                // The GQA heads consume the same VNNI tile. Each head stages
++                // a portion, then all heads use the original DPAS layout.
++                for (int i = g; i < NC * KBT; i += G) {
++                    const int c = i % NC, t = i / NC, row = src_row + t * KT;
++                    auto data = xesimd::lsc_load_2d<fp16, 16, KT, 1, false, true,
++                        xesimd::cache_hint::cached, xesimd::cache_hint::cached>(vbase, surfW, surfH, pitch, c * 16, row);
++                    slm_block_store<uint32_t, 8 * KT>(i * tile_bytes,
++                        simd<uint32_t, 8 * KT>(data.template bit_cast_view<uint32_t>().read()));
++                }
++                barrier();
++            }
+             simd<float, KBT * QR * KT> S;
+ #pragma unroll
+             for (int t = 0; t < KBT; ++t) {
+@@ -737,12 +753,22 @@
+                 simd<float, QR * 16> acc = simd<float, QR * 16>(oc) * arep;
+ #pragma unroll
+                 for (int t = 0; t < KBT; ++t) {
+-                    simd<fp16, KT * 16> vt = xesimd::lsc_load_2d<fp16, 16, KT, 1, false, true,
+-                        xesimd::cache_hint::cached, xesimd::cache_hint::cached>(vbase, surfW, surfH, pitch, c * 16, src_row + t * KT);
++                    simd<fp16, KT * 16> vt;
++                    if constexpr (share_values) {
++                        auto data = slm_block_load<uint32_t, 8 * KT>((t * NC + c) * tile_bytes);
++                        vt = data.template bit_cast_view<fp16>().read();
++                    } else {
++                        vt = xesimd::lsc_load_2d<fp16, 16, KT, 1, false, true,
++                            xesimd::cache_hint::cached, xesimd::cache_hint::cached>(vbase, surfW, surfH, pitch, c * 16, src_row + t * KT);
++                    }
+                     acc = xmx::dpas<8, 8, float, float, fp16, fp16>(acc, vt, simd<fp16, QR * 16>(P.template select<QR * KT, 1>(t * QR * KT)));
+                 }
+                 oc = acc;
+             }
++            if constexpr (share_values) {
++                if (kb0 + KB < hi)
++                    barrier();
++            }
+         }
+         simd<float, QR> inv;
+ #pragma unroll
+@@ -1032,7 +1058,8 @@
+ 
+ // Noncausal DSpark block: the K/V cache contains the context and eight
+ // freshly projected block rows. Each key split returns a normalized partial.
+-void dspark_attention(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start, at::Tensor out,
++template <bool ShareValues = false>
++void dspark_attention_impl(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start, at::Tensor out,
+                       at::Tensor lse, int64_t capacity, int64_t window, int64_t prefix) {
+     const int rows = q.size(0);
+     TORCH_CHECK(q.is_xpu() && q.scalar_type() == at::kHalf && q.is_contiguous() && q.dim() == 3 && rows >= 2 &&
+@@ -1049,7 +1076,7 @@
+                 out.size(3) == 128 && lse.dim() == 3 && lse.size(0) == out.size(0) && lse.size(1) == rows &&
+                 lse.size(2) == 24);
+     const int splits = out.size(0);
+-    fa::Kern<128, true> kernel{reinterpret_cast<const sycl::half *>(q.data_ptr()),
++    fa::Kern<128, true, false, ShareValues> kernel{reinterpret_cast<const sycl::half *>(q.data_ptr()),
+                                reinterpret_cast<const sycl::half *>(k.data_ptr()),
+                                reinterpret_cast<const sycl::half *>(v.data_ptr()),
+                                out.data_ptr<float>(),
+@@ -1075,6 +1102,16 @@
+     queue.submit([&](sycl::handler &h) { h.parallel_for(sycl::nd_range<1>(splits * 24, 3), kernel); });
+ }
+ 
++void dspark_attention(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start, at::Tensor out,
++                      at::Tensor lse, int64_t capacity, int64_t window, int64_t prefix) {
++    dspark_attention_impl(q, k, v, start, out, lse, capacity, window, prefix);
++}
++
++void dspark_attention_shared_values(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor start,
++                                    at::Tensor out, at::Tensor lse) {
++    dspark_attention_impl<true>(q, k, v, start, out, lse, 0, 0, 0);
++}
++
+ // Pack at write time into the VNNI/transpose order consumed by XMX. Each
+ // 16-token, one-KV-head tile occupies 4096 bytes inside vLLM's physical page.
+ void packed_kv_store(at::Tensor arena, at::Tensor rows, at::Tensor key, at::Tensor value) {
+@@ -1364,6 +1401,9 @@
+     m.impl("paged_xmx",torch::kXPU,&inkling2::paged_xmx);
+     m.def("dspark_attention(Tensor q, Tensor k, Tensor v, Tensor start, Tensor(a!) out, Tensor(b!) lse, int capacity, int window, int prefix=0) -> ()");
+     m.impl("dspark_attention", torch::kXPU, &inkling2::dspark_attention);
++    m.def("dspark_attention_shared_values(Tensor q, Tensor k, Tensor v, Tensor start, "
++          "Tensor(a!) out, Tensor(b!) lse) -> ()");
++    m.impl("dspark_attention_shared_values", torch::kXPU, &inkling2::dspark_attention_shared_values);
+     m.def("moe_gemv(Tensor A, Tensor W, Tensor S, Tensor? alpha, Tensor(a!) out, Tensor sorted, Tensor eob, Tensor? topw, int n_pairs, int a_row_div, int mb) -> ()");
+     m.impl("moe_gemv", torch::kXPU, &inkling2::moe_gemv);
+     m.def("decode_attn(Tensor Q, Tensor K, Tensor V, Tensor slots, Tensor? kvlen, Tensor? r2t, Tensor? rpos, Tensor qpos, Tensor rrel, Tensor proj, Tensor sink, Tensor(a!) oacc, Tensor(b!) om, Tensor(c!) ol, int nq, int ring, int window, float kscale, float vscale) -> ()");

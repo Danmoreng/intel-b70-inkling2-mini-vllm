@@ -120,10 +120,13 @@ if [[ "$mode" == paged-fused || "$mode" == paged-batch ]]; then
         patch --silent --batch --fuzz=0 --output="$output/inkling2_batch.sycl" "$staged" \
             "$PWD/patches/trellis-inkling-batch-xmx.patch"
         staged="$output/inkling2_batch.sycl"
+        patch --silent --batch --fuzz=0 --output="$output/inkling2_batch_shared_values.sycl" "$staged" \
+            "$PWD/patches/trellis-inkling-draft-shared-values.patch"
+        staged="$output/inkling2_batch_shared_values.sycl"
     fi
     source_mount=(--mount "type=bind,source=$staged,target=/opt/trellis-serve/$source_file,readonly")
     check_args=(--fused-bias)
-    if [[ "$mode" == paged-batch ]]; then check_args+=(--batch); fi
+    if [[ "$mode" == paged-batch ]]; then check_args+=(--batch --draft-shared-values); fi
 fi
 rm -f -- "$output/$lib_name.new"
 if ! timeout --kill-after=10s 5m docker run --rm --name "$build_name" --network none \
