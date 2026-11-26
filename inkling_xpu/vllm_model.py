@@ -181,19 +181,25 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             key_cache[pages, positions] = key.to(key_cache.dtype)
             value_cache[pages, positions] = value.to(value_cache.dtype)
 
-    def _decode_global(self, visit, q, k, v, pos, rel, proj, sink, batch):
+    def _decode_global(self, visit, q, k, v, pos, rel, proj, sink, batch, *, gate=None):
         key_cache, value_cache = self._pages(visit, batch)
         self._store_kv(key_cache, value_cache, k, v, batch.out_cache_loc)
         if self.batch_layout is not None:
-            return batch_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
-                             paged_splits(batch.total_tokens, self.batch_layout[2]), self.batch_layout,
-                             local=False, packed=self.packed_kv)
-        if batch.block_table.shape[0] == 1 and self.use_paged_xmx and key_cache.dtype == torch.float8_e4m3fn and self.page_tokens % 16 == 0:
+            out = batch_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
+                            paged_splits(batch.total_tokens, self.batch_layout[2]), self.batch_layout,
+                            local=False, packed=self.packed_kv)
+        elif batch.block_table.shape[0] == 1 and self.use_paged_xmx and key_cache.dtype == torch.float8_e4m3fn and self.page_tokens % 16 == 0:
             return paged_xmx(q, key_cache, value_cache, batch.block_table, batch.seq_lens,
-                             pos, rel, proj, sink, paged_splits(batch.total_tokens, q.shape[0]), self.packed_kv)
-        splits = min(64, max(8, (batch.total_tokens + 1023) // 1024))
-        return decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
-                            queries_per_request=self._st_nq, num_splits=splits)
+                             pos, rel, proj, sink, paged_splits(batch.total_tokens, q.shape[0], candidate=True),
+                             self.packed_kv, gate=gate)
+        else:
+            splits = min(64, max(8, (batch.total_tokens + 1023) // 1024))
+            out = decode_paged(q, key_cache, value_cache, batch.block_table, batch.seq_lens, pos, rel, proj, sink,
+                               queries_per_request=self._st_nq, num_splits=splits)
+        return out if gate is None else out.reshape_as(gate) * gate
+
+    def _decode_global_gated(self, visit, q, k, v, pos, rel, proj, sink, batch, gate):
+        return self._decode_global(visit, q, k, v, pos, rel, proj, sink, batch, gate=gate)
 
     def _control_norm(self, il, module, cur, msg, weight):
         if self.prefill_controller and not self._static and cur.shape[0] > 8:
@@ -307,7 +313,7 @@ class Inkling2B70ForCausalLM(Inkling2LoopForConditionalGeneration):
             return out
         splits = min(64, max(8, (batch.total_tokens + 1023) // 1024))
         if self.use_paged_xmx:
-            splits = (paged_splits(batch.total_tokens, size) if self.cache_dtype == torch.float8_e4m3fn
+            splits = (paged_splits(batch.total_tokens, size, candidate=True) if self.cache_dtype == torch.float8_e4m3fn
                       and self.page_tokens % 16 == 0 else splits)
         key = (splits, local_splits(batch.total_tokens, size), tuple(batch.block_table.shape), ids.dtype,
                tuple(cache.data_ptr() for cache in batch.caches))

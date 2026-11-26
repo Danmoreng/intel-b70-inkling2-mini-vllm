@@ -70,6 +70,10 @@ curl -fsS http://127.0.0.1:8093/v1/models
 
 The same launcher accepts `ordinary` for decoding without a drafter. A separate llama.cpp recipe runs the Unsloth GGUF checkpoint. [llama.cpp setup](docs/SETUP.md#llamacpp-and-dspark)
 
+The optimized DSpark profile supports `INKLING2_DSPARK_SPLIT_CANDIDATES=1` for the candidate split counts in single-request FP8 verification. Set `INKLING2_FUSE_PAGED_GATE=1` to apply the FP32 attention gate inside the native parallel merge on the single-request paged XMX path. Build the loop-control library before enabling the fusion. The two switches are independent and accept `0` to restore the previous paths.
+
+Set `INKLING2_DSPARK_ADAPTIVE=0` with `INKLING2_DRAFT_MAX=7` to try fixed-width DSpark. For requests without a forced output grammar, vLLM uses the draft IDs already on the GPU and the scheduler reserves a fixed number of positions. In a warm 8K coding replay on the B70 at 180 W, skipping the proposal-ID copy increased decode from 124.3 to 125.3 tok/s with identical 1,024-token outputs. The 64K trials produced different continuations across server starts, so a same-process comparison is still needed to isolate the copy effect. The launcher defaults to adaptive DSpark.
+
 ## Coding and vision results
 
 | Workload | Result |

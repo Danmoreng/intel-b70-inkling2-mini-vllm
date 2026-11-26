@@ -350,7 +350,8 @@ at::Tensor depth_mix(const at::Tensor &bank, const at::Tensor &indices, const at
     });
     return output;
 }
-at::Tensor merge_attention(const at::Tensor &partial, const at::Tensor &lse) {
+template <bool Gated = false>
+at::Tensor merge_attention_impl(const at::Tensor &partial, const at::Tensor &lse, const at::Tensor *gate) {
     constexpr int D = 128, channels = 16, groups = 8, WG = channels * groups;
     TORCH_CHECK(partial.is_xpu() && partial.is_contiguous() && partial.scalar_type() == at::kFloat &&
                 partial.dim() == 4 && partial.size(3) == D && lse.device() == partial.device() &&
@@ -358,7 +359,17 @@ at::Tensor merge_attention(const at::Tensor &partial, const at::Tensor &lse) {
                 lse.sizes() == partial.sizes().slice(0, 3));
     int parts = partial.size(0), rows = partial.size(1) * partial.size(2);
     TORCH_CHECK(parts > 0 && rows > 0);
-    auto out = at::empty({partial.size(1), partial.size(2), D}, partial.options());
+    at::Tensor out;
+    const float *gates = nullptr;
+    if constexpr (Gated) {
+        TORCH_CHECK(gate->device() == partial.device() && gate->is_contiguous() &&
+                    gate->scalar_type() == at::kFloat && gate->dim() == 2 &&
+                    gate->size(0) == partial.size(1) && gate->size(1) == partial.size(2) * D);
+        gates = gate->data_ptr<float>();
+        out = at::empty(gate->sizes(), partial.options());
+    } else {
+        out = at::empty({partial.size(1), partial.size(2), D}, partial.options());
+    }
     const float *src = partial.data_ptr<float>(), *weights = lse.data_ptr<float>();
     float *dest = out.data_ptr<float>();
     auto &queue = c10::xpu::getCurrentXPUStream(partial.device().index()).queue();
@@ -391,11 +402,21 @@ at::Tensor merge_attention(const at::Tensor &partial, const at::Tensor &lse) {
                                    sum += dots[i * channels + lane];
                                    mass += masses[i];
                                }
-                               dest[row * D + channel + lane] = mass > 0 ? sum / mass : 0.f;
+                               int index = row * D + channel + lane;
+                               float value = mass > 0 ? sum / mass : 0.f;
+                               if constexpr (Gated)
+                                   value *= gates[index];
+                               dest[index] = value;
                            }
                        });
     });
     return out;
+}
+at::Tensor merge_attention(const at::Tensor &partial, const at::Tensor &lse) {
+    return merge_attention_impl(partial, lse, nullptr);
+}
+at::Tensor merge_attention_gated(const at::Tensor &partial, const at::Tensor &lse, const at::Tensor &gate) {
+    return merge_attention_impl<true>(partial, lse, &gate);
 }
 at::Tensor draft_mix_norm(const at::Tensor& a, const at::Tensor& b, const at::Tensor& c,
                     const at::Tensor& final, const at::Tensor& mix, const at::Tensor& norms) {
@@ -444,6 +465,7 @@ TORCH_LIBRARY_FRAGMENT(inkling2_xpu, m) {
         "depth_mix(Tensor bank, Tensor indices, Tensor current, Tensor queries, Tensor? norm=None) -> Tensor",
         depth_mix);
     m.def("merge_attention(Tensor partial, Tensor lse) -> Tensor", merge_attention);
+    m.def("merge_attention_gated(Tensor partial, Tensor lse, Tensor gate) -> Tensor", merge_attention_gated);
     m.def("bank_mix(Tensor states, Tensor queries) -> Tensor", bank_mix);
     m.def("control_many(Tensor current, Tensor messages, Tensor norm, Tensor down, Tensor down_scale, Tensor "
           "up, Tensor up_scale, int first, int count) -> Tensor",

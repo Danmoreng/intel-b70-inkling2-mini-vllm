@@ -91,13 +91,43 @@ def case(length, rows, page_size, layout, runs):
             print(label, length, rows, round(statistics.median(times)), "us", flush=True)
 
 
+def check_gated_merge():
+    for parts in (1, 128, 192, 256, 512):
+        shape = (parts, 2, 24)
+        partial = torch.randn(*shape, 128, device="xpu")
+        lse = torch.randn(shape, device="xpu")
+        lse[:, 0, 0] = -torch.inf
+        gate = torch.rand(2, 24 * 128, device="xpu")
+
+        def reference():
+            return torch.ops.inkling2_xpu.merge_attention(partial, lse).reshape_as(gate) * gate
+
+        def fused():
+            return torch.ops.inkling2_xpu.merge_attention_gated(partial, lse, gate)
+
+        torch.testing.assert_close(fused(), reference(), rtol=0, atol=0)
+        graph = torch.xpu.XPUGraph()
+        with torch.xpu.graph(graph):
+            replayed = fused()
+        gate.mul_(.5)
+        graph.replay()
+        torch.xpu.synchronize()
+        torch.testing.assert_close(replayed, reference(), rtol=0, atol=0)
+        torch.testing.assert_close(replayed[0, :128], torch.zeros_like(replayed[0, :128]))
+        print(f"gated merge: {parts} splits, eager and graph FP32 parity", flush=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library")
+    parser.add_argument("--control-library", help="Check the fused gate in the native parallel merge")
     parser.add_argument("--time", action="store_true")
     args = parser.parse_args()
     torch.ops.load_library(args.library)
     torch.manual_seed(37)
+    if args.control_library:
+        torch.ops.load_library(args.control_library)
+        check_gated_merge()
     for page_size in (16, 32):
         for rows in range(1, 9):
             for length in (rows, 17, 1027):

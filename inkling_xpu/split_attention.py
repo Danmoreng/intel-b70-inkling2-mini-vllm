@@ -8,18 +8,20 @@ import triton.language as tl
 
 
 NATIVE_MERGE = os.environ.get("INKLING2_NATIVE_MERGE", "0") == "1"
+FUSE_PAGED_GATE = NATIVE_MERGE and os.environ.get("INKLING2_FUSE_PAGED_GATE", "0") == "1"
 LONG_VERIFY_SPLITS = os.environ.get("INKLING2_DSPARK_LONG_SPLITS", "0") == "1"
 TUNE_VERIFY = (
     os.environ.get("INKLING2_DSPARK_VERIFY_TUNING", "0") == "1"
     and os.environ.get("INKLING2_PACKED_KV", "0") != "1"
 )
+TUNE_CANDIDATE_SPLITS = TUNE_VERIFY and os.environ.get("INKLING2_DSPARK_SPLIT_CANDIDATES", "0") == "1"
 
 # Tables start at two target rows (one anchor plus one proposal).
 _GLOBAL_TO_64K = (192, 128, 128, 128, 256, 128, 128)
 _GLOBAL_OVER_64K = (128, 128, 128, 128, 256, 256, 256)
 _LOCAL_FULL_WINDOW = (96, 48, 48, 48, 96, 96, 96)
-
-
+_SHORT_PAGED_CANDIDATES = {2: 192, 4: 128, 6: 64, 8: 64}
+_LONG_PAGED_CANDIDATES = {2: 192, 6: 256, 8: 256}
 
 @triton.jit
 def _merge(PART, LSE, OUT, heads: tl.constexpr, parts: tl.constexpr, BP: tl.constexpr, BD: tl.constexpr):
@@ -48,7 +50,14 @@ def merge_splits(partial, lse):
     return result
 
 
-def paged_splits(tokens, rows=1):
+def paged_splits(tokens, rows=1, *, candidate=False):
+    if candidate and TUNE_CANDIDATE_SPLITS:
+        if 6_144 <= tokens <= 12_288 and rows in _SHORT_PAGED_CANDIDATES:
+            return _SHORT_PAGED_CANDIDATES[rows]
+        if 60_000 <= tokens <= 65_536 and rows == 8:
+            return 256
+        if tokens >= 196_608 and rows in _LONG_PAGED_CANDIDATES:
+            return _LONG_PAGED_CANDIDATES[rows]
     # B70 single-row XMX decode benefits from more independent key tiles on
     # short prompts and fewer partial results to merge at very long lengths.
     if TUNE_VERIFY and 2 <= rows <= 8 and 50_000 <= tokens < 150_000:
@@ -63,7 +72,7 @@ def paged_splits(tokens, rows=1):
     return min(512, max(16, 1 << (max(1, (tokens - 1) // 256).bit_length())))
 
 
-def paged_xmx(q, key_cache, value_cache, pages, length, pos, rel, proj, sink, parts, packed=False):
+def paged_xmx(q, key_cache, value_cache, pages, length, pos, rel, proj, sink, parts, packed=False, *, gate=None):
     rows, heads, width = q.shape
     partial = q.new_empty((parts, rows, heads, width), dtype=torch.float32)
     lse = q.new_empty((parts, rows, heads), dtype=torch.float32)
@@ -80,7 +89,11 @@ def paged_xmx(q, key_cache, value_cache, pages, length, pos, rel, proj, sink, pa
         lse,
         *([True] if packed else []),
     )
-    return merge_splits(partial, lse)
+    if gate is None:
+        return merge_splits(partial, lse)
+    if FUSE_PAGED_GATE and gate.dtype == torch.float32 and gate.is_contiguous():
+        return torch.ops.inkling2_xpu.merge_attention_gated(partial, lse, gate)
+    return merge_splits(partial, lse).reshape_as(gate) * gate
 
 
 def local_splits(tokens, rows):

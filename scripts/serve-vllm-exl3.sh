@@ -61,7 +61,8 @@ check_vendor_patch() {
     git -C "$vendor" diff -- "$source_file" | cmp - "$patch_file"
 }
 check_vendor_patch xpu/exl3xpu/inkling2/sgl_model.py trellis-inkling-external-runner.patch \
-    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588 e30e35e03f57f17cffcc585f14ccab74839952db47c8effaea4d86d5fb6bfa70
+    9227ddc921e5dad0c598fb712d029534fb3ca6732cf0a98f38a38bcc8e5e2896 9188158ae9c55e91d9d17440fd5969bc5f6dade764cd5a4a1f0036426c3a5588 e30e35e03f57f17cffcc585f14ccab74839952db47c8effaea4d86d5fb6bfa70 \
+    247ae4654c103fc199ca725c0c71b5ae91142625a03029fb30da30ed603d2f80
 check_vendor_patch xpu/exl3xpu/inkling2/dense.py trellis-inkling-dense-w8a8-prefill.patch
 check_vendor_patch xpu/exl3xpu/inkling2/vendor/inkling2_vision.py trellis-inkling-vision-qkv.patch
 
@@ -226,6 +227,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_QKV_SPLITS=${INKLING2_QKV_SPLITS:-2}" \
     --env "INKLING2_PREP_LIB=${INKLING2_PREP_LIB:-}" \
     --env "INKLING2_NATIVE_MERGE=${INKLING2_NATIVE_MERGE:-0}" \
+    --env "INKLING2_FUSE_PAGED_GATE=${INKLING2_FUSE_PAGED_GATE:-0}" \
     --env "INKLING2_TUNE_DENSE=${INKLING2_TUNE_DENSE:-0}" \
     --env "INKLING2_FIXED_ROUTER=${INKLING2_FIXED_ROUTER:-0}" \
     --env "INKLING2_GROUP_CONTROLLERS=${INKLING2_GROUP_CONTROLLERS:-0}" \
@@ -236,6 +238,7 @@ timeout --kill-after=12s "${seconds}s" docker run --rm --init --name "$name" \
     --env "INKLING2_SYCL_ROUTER=${INKLING2_SYCL_ROUTER:-0}" \
     --env "INKLING2_DSPARK_LONG_SPLITS=${INKLING2_DSPARK_LONG_SPLITS:-0}" \
     --env "INKLING2_DSPARK_VERIFY_TUNING=${INKLING2_DSPARK_VERIFY_TUNING:-0}" \
+    --env "INKLING2_DSPARK_SPLIT_CANDIDATES=${INKLING2_DSPARK_SPLIT_CANDIDATES:-0}" \
     --env "INKLING2_DSPARK_BLOCK=${INKLING2_DSPARK_BLOCK:-0}" \
     --env "INKLING2_DSPARK_GRAPH=${INKLING2_DSPARK_GRAPH:-0}" \
     --env "INKLING2_COMPARE_DRAFT_GRAPH=${INKLING2_COMPARE_DRAFT_GRAPH:-0}" \
