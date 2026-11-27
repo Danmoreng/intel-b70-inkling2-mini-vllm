@@ -104,6 +104,17 @@ fi
 
 spec_mounts=()
 spec_args=()
+if [[ ${INKLING2_AGENT_TOOLS:-0} == 1 ]]; then
+    base=/opt/venv/lib/python3.12/site-packages/vllm
+    files=(parser/inkling.py entrypoints/openai/chat_completion/serving.py)
+    mkdir -p "$work/strict-json"
+    docker run --rm --network none --entrypoint tar "$runtime" -C "$base" -cf - "${files[@]}" |
+        tar -xf - -C "$work/strict-json"
+    patch --silent --batch --forward --fuzz=0 -d "$work/strict-json" -p1 <patches/vllm-inkling-strict-json.patch
+    for file in "${files[@]}"; do
+        spec_mounts+=(--mount "type=bind,source=$work/strict-json/$file,target=$base/$file,readonly")
+    done
+fi
 if [[ ${INKLING2_VISION:-0} == 1 ]]; then
     spec_args+=(--limit-mm-per-prompt '{"image":64}')
 fi

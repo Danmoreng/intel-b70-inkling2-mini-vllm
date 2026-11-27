@@ -1,0 +1,55 @@
+--- a/parser/inkling.py
++++ b/parser/inkling.py
+@@ -31,7 +31,7 @@
+ 
+ from vllm.entrypoints.generate.base.protocol import ExtractedToolCallInformation
+ from vllm.parser.engine.events import EventType
+-from vllm.parser.engine.parser_engine import ParserEngine
++from vllm.parser.engine.parser_engine import ParserEngine, ReasoningEnd
+ from vllm.parser.engine.parser_engine_config import (
+     ParserEngineConfig,
+     ParserState,
+@@ -270,6 +270,20 @@
+                 return True
+         return False
+ 
++    @property
++    def reasoning_end_token_ids(self) -> frozenset[int]:
++        token_id = self.vocab.get(CONTENT_TEXT)
++        return frozenset() if token_id is None else frozenset({token_id})
++
++    def find_reasoning_end(self, token_ids: Sequence[int]) -> ReasoningEnd:
++        # This is a protocol marker, not part of the JSON payload. An
++        # accepted draft can contain both the marker and first answer tokens.
++        text_id = self.vocab.get(CONTENT_TEXT)
++        for offset, token_id in enumerate(token_ids):
++            if token_id == text_id:
++                return ReasoningEnd(offset, implicit=False)
++        return ReasoningEnd(len(token_ids), implicit=False)
++
+     def count_reasoning_tokens(self, token_ids: Sequence[int]) -> int:
+         vocab = self.vocab
+         thinking_id = vocab.get(CONTENT_THINKING)
+--- a/entrypoints/openai/chat_completion/serving.py
++++ b/entrypoints/openai/chat_completion/serving.py
+@@ -254,10 +254,18 @@
+                     chat_template_kwargs
+                 ),
+             }
++        reasoning_ended = request.resolve_reasoning_ended(parser, prompt_token_ids or [])
++        if (
++            self.model_config.tokenizer_mode == "inkling"
++            and request.thinking_token_budget == 0
++            and request.response_format is not None
++            and request.response_format.type in ("json_schema", "json_object")
++        ):
++            # No reasoning tokens are allowed, even if the model fails to
++            # open the answer block. Constrain the first generated token.
++            reasoning_ended = True
+         return {
+-            "reasoning_ended": request.resolve_reasoning_ended(
+-                parser, prompt_token_ids or []
+-            ),
++            "reasoning_ended": reasoning_ended,
+             "reasoning_parser_kwargs": reasoning_parser_kwargs,
+         }
